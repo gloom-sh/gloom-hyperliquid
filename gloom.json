@@ -1,0 +1,25 @@
+{
+  "id": "hyperliquid",
+  "name": "Hyperliquid",
+  "tagline": "Perpetual futures board and trading on Hyperliquid",
+  "description": "Hyperliquid perpetual futures in Gloom: a live market board across crypto and the HIP-3 stock, index, commodity and FX perps, charts, order book, funding and open interest, and order entry from your own wallet.",
+  "categories": [
+    "data",
+    "crypto",
+    "trading"
+  ],
+  "targets": [
+    "cli",
+    "tui",
+    "desktop"
+  ],
+  "hosts": [
+    "api.hyperliquid.xyz"
+  ],
+  "contributes": {
+    "panes": [
+      "hyperliquid"
+    ]
+  },
+  "minGloom": "0.15.0"
+}

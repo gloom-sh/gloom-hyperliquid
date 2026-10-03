@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # The host revision this plugin builds against. Bump after a host release.
+      GLOOMBERB_REVISION: 90fc2a0024c1d86f723d4138ee241abd0341e27a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      # Mirrors what Gloom does at install time: link the host rather than
+      # depending on it, so there is exactly one copy of gloomberb and react and
+      # CI typechecks against the same module graph that runs in production.
+      - name: Link the Gloom host
+        run: |
+          git init "$RUNNER_TEMP/gloomberb"
+          git -C "$RUNNER_TEMP/gloomberb" remote add origin https://github.com/gloom-sh/gloomberb.git
+          git -C "$RUNNER_TEMP/gloomberb" fetch --depth 1 origin "$GLOOMBERB_REVISION"
+          git -C "$RUNNER_TEMP/gloomberb" checkout --detach FETCH_HEAD
+          bun install --cwd "$RUNNER_TEMP/gloomberb"
+          mkdir -p node_modules
+          ln -sfn "$RUNNER_TEMP/gloomberb" node_modules/gloomberb
+          ln -sfn "$RUNNER_TEMP/gloomberb/node_modules/react" node_modules/react
+
+      - run: bun run typecheck
+      - run: bun test
