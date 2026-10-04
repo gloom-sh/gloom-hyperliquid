@@ -4,7 +4,6 @@ import {
   Button,
   ChartTableHeader,
   DataTableView,
-  EmptyState,
   PaneStatusBody,
   QueryBar,
   scalarPoint,
@@ -28,7 +27,16 @@ import type {
   PredictedFunding,
 } from "../market";
 import { getCloudPerpsClient } from "../market/cloud-history";
-import { compact, dateTime, number, percent, price, tone } from "./format";
+import {
+  compact,
+  dateTime,
+  fundingRate,
+  fundingTone,
+  number,
+  percent,
+  price,
+  tone,
+} from "./format";
 import { useBoard, useLiveFooter, useNetwork } from "./hooks";
 
 const RANGE_OPTIONS = [1, 7, 30, 90, 365].map((days) => ({
@@ -44,6 +52,13 @@ const RANGE_OPTIONS = [1, 7, 30, 90, 365].map((days) => ({
             ? "3M"
             : "1Y",
 }));
+const VENUES: Record<string, string> = {
+  BinPerp: "Binance",
+  BybitPerp: "Bybit",
+  HlPerp: "Hyperliquid",
+  OkxPerp: "OKX",
+};
+const venueName = (venue: string) => VENUES[venue] ?? venue;
 const RESOLUTION_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
 const RESOLUTION_LABEL = { minute: "1m", hour: "1h", day: "1d" };
 function CloudStateBody({
@@ -56,8 +71,6 @@ function CloudStateBody({
   retry: () => void;
 }) {
   const app = usePluginAppActions();
-  if (loading && !result)
-    return <PaneStatusBody loading subject="historical analytics" />;
   const title =
     result?.state === "sign-in"
       ? "Sign in for perpetual history."
@@ -68,33 +81,38 @@ function CloudStateBody({
           : result?.state === "collecting"
             ? "History is still collecting."
             : "Historical analytics unavailable.";
+  // A retry only helps a failed request; a host without plugin cloud access or
+  // a testnet connection gives the same answer every time.
+  const retryable =
+    result?.state !== "testnet" && result?.state !== "host-unavailable";
   return (
-    <Box padding={1}>
-      <EmptyState
-        title={title}
-        hint={
-          result?.error ??
-          "Historical analytics are not available from Gloom Cloud yet."
-        }
-        actions={
-          result?.state === "sign-in" ? (
-            <Button
-              label="Sign in"
-              variant="primary"
-              onPress={() => app.openCommandBar("Sign in")}
-            />
-          ) : result?.state === "pro-required" ? (
-            <Button
-              label="Upgrade to Pro"
-              variant="primary"
-              onPress={() => app.openCommandBar("Upgrade to Pro")}
-            />
-          ) : result?.state === "testnet" ? undefined : (
-            <Button label="Try again" onPress={retry} />
-          )
-        }
-      />
-    </Box>
+    <PaneStatusBody
+      loading={loading && !result}
+      subject="historical analytics"
+      empty
+      emptyTitle={title}
+      emptyMessage={
+        result?.error ??
+        "Historical analytics are not available from Gloom Cloud yet."
+      }
+      actions={
+        result?.state === "sign-in" ? (
+          <Button
+            label="Sign in"
+            variant="primary"
+            onPress={() => app.openCommandBar("Sign in")}
+          />
+        ) : result?.state === "pro-required" ? (
+          <Button
+            label="Upgrade to Pro"
+            variant="primary"
+            onPress={() => app.openCommandBar("Upgrade to Pro")}
+          />
+        ) : retryable ? (
+          <Button label="Try again" onPress={retry} />
+        ) : undefined
+      }
+    />
   );
 }
 export function FundingHistory({
@@ -354,11 +372,11 @@ export function FundingHistory({
   useLiveFooter("hyperliquid-history", {
     network,
     status: resource.loading
-      ? "Loading history"
+      ? "loading history"
       : data && !resource.data?.locked
         ? `${data.truncated ? "Truncated" : resource.data?.state === "partial" ? "Partial" : "Historical"} · ${history.effectiveResolution}${history.gaps ? " · Gaps" : ""} · Coverage ${history.coverage}`
-        : (resource.data?.state ?? "unavailable"),
-    asOf: resource.data?.asOf,
+        : undefined,
+    asOf: data && !resource.data?.locked ? resource.data?.asOf : null,
     error:
       resource.error ??
       (data?.truncated
@@ -370,7 +388,7 @@ export function FundingHistory({
       width={width}
       meta={
         data && !resource.data?.locked
-          ? `${data.truncated ? "TRUNCATED · " : ""}Actual ${history.effectiveResolution}${history.samples == null ? "" : ` · ${number(history.samples, 0)} samples`}${history.gaps ? " · Gaps retained" : ""}`
+          ? `Actual ${history.effectiveResolution}`
           : undefined
       }
       filters={[
@@ -427,9 +445,10 @@ export function FundingHistory({
     return (
       <Box flexGrow={1} flexDirection="column">
         {query}
-        <EmptyState
-          title="No history in this range."
-          hint="Choose another range or wait for new observations."
+        <PaneStatusBody
+          empty
+          emptyTitle="No history in this range."
+          emptyMessage="Choose another range or wait for new observations."
         />
       </Box>
     );
@@ -495,7 +514,7 @@ export function FundingHistory({
         return {
           text: percentage ? percent(numeric, 4) : compact(numeric),
           value: numeric == null ? null : numeric * (percentage ? 100 : 1),
-          color: percentage ? tone(numeric) : undefined,
+          color: percentage ? tone(numeric, 4) : undefined,
         };
       }}
       emptyStateTitle="No history in this range."
@@ -588,6 +607,7 @@ export function HyperliquidAnalyticsPane({
     },
     focused: focused && !search.active,
     compact: true,
+    dense: true,
   });
   const rankings = resource.data?.data;
   const section =
@@ -621,6 +641,13 @@ export function HyperliquidAnalyticsPane({
         })
       : rows;
   }, [rankings, section, category, query, sort]);
+  const [mountedAt] = useState(Date.now);
+  // Predictions arrive after the market list; an empty list stays "loading"
+  // for a short while instead of claiming that none were returned.
+  const predictedLoading =
+    !board.predictedFundings.length &&
+    !board.error &&
+    Date.now() - mountedAt < 20_000;
   const predicted = board.predictedFundings.filter(
     (p) =>
       (!query || p.coin.toLowerCase().includes(query.toLowerCase())) &&
@@ -633,12 +660,14 @@ export function HyperliquidAnalyticsPane({
       ? board
       : {
           network: board.network,
+          // An unavailable or locked state is the body's message; the
+          // footer does not repeat it or show its internal state name.
           status: resource.loading
-            ? "Loading rankings"
-            : resource.data?.state === "ready"
-              ? "Historical rankings"
-              : (resource.data?.state ?? "unavailable"),
-          asOf: resource.data?.asOf,
+            ? "loading rankings"
+            : rankings && !resource.data?.locked
+              ? "updated"
+              : undefined,
+          asOf: rankings && !resource.data?.locked ? resource.data?.asOf : null,
           error: resource.error,
         },
     [
@@ -730,23 +759,29 @@ export function HyperliquidAnalyticsPane({
         rootHeight={height}
         rootBefore={before}
         columns={[
-          { id: "coin", label: "Market", width: 16, align: "left" },
-          { id: "venue", label: "Venue (reported)", width: 21, align: "left" },
-          { id: "rate", label: "Predicted rate", width: 16, align: "right" },
+          { id: "coin", label: "Market", width: 14, align: "left" },
+          { id: "venue", label: "Venue", width: 12, align: "left" },
+          { id: "rate", label: "Rate", width: 11, align: "right" },
           {
             id: "intervalHours",
-            label: "Interval h",
-            width: 12,
+            label: "Interval",
+            width: 8,
             align: "right",
           },
-          { id: "apr", label: "Simple APR", width: 14, align: "right" },
+          { id: "per8h", label: "Rate /8h", width: 11, align: "right" },
+          { id: "apr", label: "Simple APR", width: 11, align: "right" },
           {
             id: "nextFundingTime",
             label: "Next payment UTC",
-            width: 21,
+            width: 19,
             align: "left",
           },
         ]}
+        emptyContent={
+          predictedLoading ? (
+            <PaneStatusBody loading subject="predicted funding" />
+          ) : undefined
+        }
         items={[...predicted].sort((a, b) => {
           const av = a[(sort.id || "apr") as keyof PredictedFunding],
             bv = b[(sort.id || "apr") as keyof PredictedFunding];
@@ -778,18 +813,30 @@ export function HyperliquidAnalyticsPane({
             symbol: row.coin,
           })
         }
-        renderCell={(row, column) => ({
-          text:
-            column.id === "apr" || column.id === "rate"
-              ? percent(row[column.id], column.id === "rate" ? 4 : 2)
-              : column.id === "nextFundingTime"
-                ? dateTime(row.nextFundingTime)
-                : String(row[column.id as keyof PredictedFunding]),
-          color:
-            column.id === "apr" || column.id === "rate"
-              ? tone(row[column.id])
-              : undefined,
-        })}
+        renderCell={(row, column) => {
+          if (column.id === "rate" || column.id === "per8h")
+            return {
+              text: fundingRate(row[column.id]),
+              value: row[column.id] * 100,
+              color: fundingTone(row[column.id]),
+            };
+          if (column.id === "apr")
+            return {
+              text: percent(row.apr),
+              value: row.apr * 100,
+              color: tone(row.apr, 2),
+            };
+          if (column.id === "intervalHours")
+            return { text: `${row.intervalHours}h`, value: row.intervalHours };
+          if (column.id === "nextFundingTime")
+            return {
+              text: dateTime(row.nextFundingTime),
+              value: new Date(row.nextFundingTime).toISOString(),
+            };
+          if (column.id === "venue") return { text: venueName(row.venue) };
+          return { text: row.coin };
+        }}
+        selectedTextOverridesCellColor
         emptyStateTitle="No predicted funding returned."
       />
     );
@@ -859,7 +906,9 @@ export function HyperliquidAnalyticsPane({
             typeof value === "number"
               ? value * (percentage ? 100 : 1)
               : undefined,
-          color: percentage ? tone(value as number | null) : undefined,
+          color: percentage
+            ? tone(value as number | null, column.id === "funding8h" ? 4 : 2)
+            : undefined,
         };
       }}
       selectedTextOverridesCellColor
