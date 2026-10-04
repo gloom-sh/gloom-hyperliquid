@@ -60,6 +60,7 @@ export class MarketDataService {
     status: "idle",
     asOf: null,
     error: null,
+    catalogError: null,
     predictedFundings: [],
   };
   private listeners = new Set<() => void>();
@@ -304,6 +305,7 @@ export class MarketDataService {
           dexes,
           asOf: this.contextTime,
           error: null,
+          catalogError: null,
           status: this.listeners.size ? this.ws.getStatus() : "idle",
         });
         await this.fetchPredicted();
@@ -374,6 +376,7 @@ export class MarketDataService {
           ? Math.max(...markets.map((m) => m.asOf))
           : Date.now(),
         error: errors.length ? errors.join("; ") : null,
+        catalogError: errors.length ? errors.join("; ") : null,
         status: this.listeners.size
           ? this.ws.getStatus() === "live"
             ? "live"
@@ -384,6 +387,7 @@ export class MarketDataService {
     } catch (error) {
       this.patch({
         error: message(error),
+        catalogError: message(error),
         status: this.snapshot.markets.length ? "stale" : "error",
       });
     }

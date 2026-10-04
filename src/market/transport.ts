@@ -59,6 +59,21 @@ export class InfoError extends Error {
     this.name = "InfoError";
   }
 }
+export interface InfoClock {
+  now(): number;
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+}
+const infoClock: InfoClock = { now: () => Date.now(), sleep };
+const RATE_LIMIT_MESSAGE =
+  "Hyperliquid rate limited the request. Retry in a minute.";
+const RETRY_WINDOW_MS = 60_000;
+function retryAfterMs(value: string | null, now: number): number {
+  if (!value?.trim()) return 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+}
 /** One sliding-window budget for all market and account reads. Keeps 300 weight/min for other clients. */
 export class InfoClient {
   private spent: { time: number; weight: number }[] = [];
@@ -69,6 +84,7 @@ export class InfoClient {
     readonly network: Network,
     private fetcher: typeof fetch = fetch,
     private budget = 900,
+    private clock: InfoClock = infoClock,
   ) {}
   request<T>(
     body: Record<string, unknown>,
@@ -88,12 +104,22 @@ export class InfoClient {
     }
     return promise;
   }
-  private async reserve(weight: number, signal?: AbortSignal) {
+  private async reserve(
+    weight: number,
+    signal: AbortSignal | undefined,
+    retryUntil?: number,
+  ) {
     if (weight > this.budget)
       throw new Error("Request exceeds local REST weight budget");
     for (;;) {
       if (signal?.aborted) throw signal.reason ?? new Error("Aborted");
-      const now = Date.now();
+      const now = this.clock.now();
+      if (now < this.cooldownUntil) retryUntil ??= now + RETRY_WINDOW_MS;
+      if (
+        retryUntil !== undefined &&
+        this.cooldownUntil > retryUntil
+      )
+        throw new InfoError(RATE_LIMIT_MESSAGE, 429);
       this.spent = this.spent.filter((s) => now - s.time < 60_000);
       const used = this.spent.reduce((sum, s) => sum + s.weight, 0);
       if (
@@ -103,23 +129,33 @@ export class InfoClient {
       ) {
         this.spent.push({ time: now, weight });
         this.inFlight++;
-        return;
+        return retryUntil;
       }
+      // A permitted cooldown may wake late. Retry if ready; do not extend queueing.
+      if (retryUntil !== undefined && now >= retryUntil)
+        throw new InfoError(RATE_LIMIT_MESSAGE, 429);
       const wait =
         now < this.cooldownUntil
           ? this.cooldownUntil - now
           : used + weight > this.budget
             ? 60_010 - (now - (this.spent[0]?.time ?? now))
             : 25;
-      await sleep(Math.max(25, Math.min(wait, 1000)), signal);
+      await this.clock.sleep(Math.max(25, Math.min(wait, 1000)), signal);
     }
   }
   private async perform<T>(
     body: Record<string, unknown>,
     options: { signal?: AbortSignal; weight?: number },
   ): Promise<T> {
+    // Only idempotent /info reads retry, with three attempts and a bounded cooldown window.
+    // Ordinary local-budget queueing before the first 429 does not consume that window.
+    let retryUntil: number | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
-      await this.reserve(options.weight ?? infoWeight(body), options.signal);
+      retryUntil = await this.reserve(
+        options.weight ?? infoWeight(body),
+        options.signal,
+        retryUntil,
+      );
       try {
         const timeout = AbortSignal.timeout(20_000);
         const response = await this.fetcher(`${ENDPOINTS[this.network]}/info`, {
@@ -131,14 +167,19 @@ export class InfoClient {
             : timeout,
         });
         if (response.status === 429) {
-          const retryAfter = Number(response.headers.get("retry-after"));
-          this.cooldownUntil =
-            Date.now() +
-            Math.max(
-              Number.isFinite(retryAfter) ? retryAfter * 1000 : 0,
-              2_000 * 2 ** attempt,
-            );
-          if (attempt < 2) continue;
+          const now = this.clock.now();
+          retryUntil ??= now + RETRY_WINDOW_MS;
+          this.cooldownUntil = Math.max(
+            this.cooldownUntil,
+            now +
+              Math.max(
+                retryAfterMs(response.headers.get("retry-after"), now),
+                2_000 * 2 ** attempt,
+              ),
+          );
+          await response.body?.cancel().catch(() => {});
+          if (attempt === 2) throw new InfoError(RATE_LIMIT_MESSAGE, 429);
+          continue;
         }
         if (!response.ok)
           throw new InfoError(
@@ -155,7 +196,7 @@ export class InfoClient {
                 : 0;
           if (divisor)
             this.spent.push({
-              time: Date.now(),
+              time: this.clock.now(),
               weight: Math.ceil(result.length / divisor),
             });
         }
@@ -164,7 +205,7 @@ export class InfoClient {
         this.inFlight--;
       }
     }
-    throw new InfoError("Hyperliquid rate limit exceeded", 429);
+    throw new InfoError(RATE_LIMIT_MESSAGE, 429);
   }
 }
 export interface SocketLike {

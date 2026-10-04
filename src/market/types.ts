@@ -103,6 +103,8 @@ export interface BoardSnapshot {
   status: LiveStatus;
   asOf: number | null;
   error: string | null;
+  /** Catalog completeness failures, separate from optional analytics errors. */
+  catalogError?: string | null;
   predictedFundings: PredictedFunding[];
 }
 export interface Candle {

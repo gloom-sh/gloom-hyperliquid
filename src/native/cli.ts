@@ -271,12 +271,28 @@ export const hyperliquidCli: CliCommandDef = {
           checkResult(result);
         } else {
           await shared.refresh();
+          const catalog = shared.getSnapshot();
+          if (
+            !catalog.markets.length ||
+            ["error", "stale"].includes(catalog.status)
+          )
+            throw new Error(
+              catalog.catalogError ??
+                "Hyperliquid market catalog is unavailable. Retry in a minute.",
+            );
           const market = resolveMarket(
-            shared.getSnapshot().markets,
+            catalog.markets,
             required(flags, "market"),
           );
-          if (!market || market.mark == null)
-            throw new Error("No active market matches.");
+          if (!market)
+            throw new Error(
+              catalog.catalogError ?? "No active market matches.",
+            );
+          if (market.mark == null)
+            throw new Error(
+              catalog.catalogError ??
+                `Hyperliquid price is unavailable for ${market.coin}. Retry in a minute.`,
+            );
           const kind = choice(
             flags,
             "kind",

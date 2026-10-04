@@ -156,3 +156,5 @@ Additional public evidence files in the same owner-only verification directory:
 `trading-security.md` summary has been updated to point to these funded results.
 
 2026-10-04 close regression: reproduced the idle-stop race with a 17-second testnet collateral delay; fixed CLI/pane close, close-all and exact percentage sizing; three full BTC closes, 50% close, limit close/cancel and delayed close-all during pane removal passed; final REST/WS checks show zero positions/orders/TWAPs (498.560973 mock USDC); typecheck, 84 tests/413 assertions and doctor pass; evidence: `close-matrix-fixed.json`, `closeall-regression.json`, `close-final-evidence.json` in the same verification directory.
+
+2026-10-04 CLI rate-limit regression: catalog failures/empty results retain their real cause; info reads make up to three HTTP 429 attempts with backoff and Retry-After, while signed sends remain single-attempt; offline tests cover recovery, exhaustion, cancellation and preview/order/close errors; typecheck, 95 tests/483 assertions and doctor pass; no UI files changed or mainnet signed requests sent.

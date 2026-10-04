@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { InfoClient, SharedWebSocket, infoWeight } from "./transport.ts";
-import type { SocketLike, StreamClock } from "./transport.ts";
+import { InfoClient, InfoError, SharedWebSocket, infoWeight } from "./transport.ts";
+import type { InfoClock, SocketLike, StreamClock } from "./transport.ts";
 class FakeSocket implements SocketLike {
   readyState = 0;
   onopen: ((e: any) => void) | null = null;
@@ -82,6 +82,39 @@ function makeHub(
     clock,
   );
   return { hub, sockets, clock };
+}
+function restClock(clock: FakeClock): InfoClock {
+  return {
+    now: clock.now,
+    sleep: (ms, signal) =>
+      new Promise((resolve, reject) => {
+        signal?.throwIfAborted();
+        const abort = () => {
+          clock.clearTimeout(timer);
+          reject(signal?.reason);
+        };
+        const timer = clock.timeout(() => {
+          signal?.removeEventListener("abort", abort);
+          resolve();
+        }, ms);
+        signal?.addEventListener("abort", abort, { once: true });
+      }),
+  };
+}
+async function flushMicrotasks() {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+}
+async function advanceRestClock(clock: FakeClock, ms: number) {
+  const end = clock.time + ms;
+  await flushMicrotasks();
+  for (;;) {
+    const next = Math.min(...[...clock.jobs.values()].map((job) => job.at));
+    if (next > end) break;
+    clock.advance(next - clock.time);
+    await flushMicrotasks();
+  }
+  clock.advance(end - clock.time);
+  await flushMicrotasks();
 }
 describe("shared WebSocket lifecycle", () => {
   test("deduplicates subscriptions and unsubscribes only when final listener closes", () => {
@@ -212,6 +245,8 @@ describe("shared WebSocket lifecycle", () => {
   });
 });
 describe("public REST transport", () => {
+  const rateLimitMessage =
+    "Hyperliquid rate limited the request. Retry in a minute.";
   test("uses documented weight classes and deduplicates concurrent reads", async () => {
     expect(infoWeight({ type: "l2Book" })).toBe(2);
     expect(infoWeight({ type: "userRole" })).toBe(60);
@@ -245,5 +280,194 @@ describe("public REST transport", () => {
     );
     controller.abort(new Error("Cancelled queue"));
     await expect(promise).rejects.toThrow("Cancelled queue");
+  });
+  for (const header of ["seconds", "date"] as const) {
+    test(`recovers after 429 and honors Retry-After ${header}`, async () => {
+      const clock = new FakeClock();
+      const requests: number[] = [];
+      const client = new InfoClient(
+        "testnet",
+        (async () => {
+          requests.push(clock.now());
+          return requests.length === 1
+            ? new Response("busy", {
+                status: 429,
+                headers: {
+                  "retry-after": header === "seconds"
+                    ? "7"
+                    : new Date(clock.now() + 7000).toUTCString(),
+                },
+              })
+            : Response.json({ ok: true });
+        }) as unknown as typeof fetch,
+        900,
+        restClock(clock),
+      );
+      const result = client.request({ type: "meta" });
+      await advanceRestClock(clock, 6999);
+      expect(requests).toEqual([1000]);
+      await advanceRestClock(clock, 1);
+      expect(await result).toEqual({ ok: true });
+      expect(requests).toEqual([1000, 8000]);
+    });
+  }
+  test("exhausts three attempts with bounded backoff and an actionable 429", async () => {
+    const clock = new FakeClock();
+    const requests: number[] = [];
+    const client = new InfoClient(
+      "testnet",
+      (async () => {
+        requests.push(clock.now());
+        return new Response("provider details", {
+          status: 429,
+          headers: { "retry-after": "invalid" },
+        });
+      }) as unknown as typeof fetch,
+      900,
+      restClock(clock),
+    );
+    const result = client.request({ type: "meta" }).catch((error) => error);
+    await advanceRestClock(clock, 6000);
+    const error = await result;
+    expect(error).toBeInstanceOf(InfoError);
+    if (!(error instanceof InfoError)) throw error;
+    expect(error.status).toBe(429);
+    expect(error.message).toBe(rateLimitMessage);
+    expect(requests).toEqual([1000, 3000, 7000]);
+    expect(clock.jobs.size).toBe(0);
+  });
+  test("does not retry before a server cooldown beyond the bounded retry window", async () => {
+    const clock = new FakeClock();
+    let requests = 0;
+    const client = new InfoClient(
+      "testnet",
+      (async () => {
+        requests++;
+        return new Response(null, {
+          status: 429,
+          headers: { "retry-after": "120" },
+        });
+      }) as unknown as typeof fetch,
+      900,
+      restClock(clock),
+    );
+    await expect(client.request({ type: "meta" })).rejects.toThrow(rateLimitMessage);
+    await expect(client.request({ type: "spotMeta" })).rejects.toThrow(rateLimitMessage);
+    expect(requests).toBe(1);
+    expect(clock.jobs.size).toBe(0);
+  });
+  test("allows a full minute Retry-After even when its timer wakes late", async () => {
+    const clock = new FakeClock();
+    const requests: number[] = [];
+    const client = new InfoClient(
+      "testnet",
+      (async () => {
+        requests.push(clock.now());
+        return requests.length === 1
+          ? new Response(null, {
+              status: 429,
+              headers: { "retry-after": "60" },
+            })
+          : Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      900,
+      restClock(clock),
+    );
+    const result = client.request({ type: "meta" });
+    await advanceRestClock(clock, 59_000);
+    // Emulate a timer dispatched 5ms late, without rewinding the clock to its due time.
+    clock.time += 1005;
+    for (const [id, job] of [...clock.jobs]) {
+      if (job.at > clock.time) continue;
+      clock.jobs.delete(id);
+      job.callback();
+    }
+    expect(await result).toEqual({ ok: true });
+    expect(requests).toEqual([1000, 61005]);
+  });
+  test("local weight queueing before the first 429 does not consume the retry window", async () => {
+    const clock = new FakeClock();
+    const requests: number[] = [];
+    const client = new InfoClient(
+      "testnet",
+      (async () => {
+        requests.push(clock.now());
+        return requests.length === 2
+          ? new Response(null, { status: 429 })
+          : Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      40,
+      restClock(clock),
+    );
+    await client.request({ type: "bootstrap" }, { weight: 40 });
+    const result = client.request({ type: "meta" });
+    await advanceRestClock(clock, 60_000);
+    expect(requests).toEqual([1000, 61000]);
+    await advanceRestClock(clock, 2000);
+    expect(await result).toEqual({ ok: true });
+    expect(requests).toEqual([1000, 61000, 63000]);
+  });
+  test("a concurrent 429 cannot shorten a longer shared cooldown", async () => {
+    const clock = new FakeClock();
+    const requests: { type: string; time: number }[] = [];
+    const client = new InfoClient(
+      "testnet",
+      (async (_url: unknown, init: RequestInit) => {
+        const { type } = JSON.parse(String(init.body));
+        const first = !requests.some((request) => request.type === type);
+        requests.push({ type, time: clock.now() });
+        return first
+          ? new Response(null, {
+              status: 429,
+              headers: { "retry-after": type === "meta" ? "10" : "2" },
+            })
+          : Response.json({ type });
+      }) as unknown as typeof fetch,
+      900,
+      restClock(clock),
+    );
+    const results = Promise.all([
+      client.request({ type: "meta" }),
+      client.request({ type: "spotMeta" }),
+    ]);
+    await advanceRestClock(clock, 9999);
+    expect(requests).toHaveLength(2);
+    await advanceRestClock(clock, 1);
+    expect(await results).toEqual([{ type: "meta" }, { type: "spotMeta" }]);
+    expect(requests.map((request) => request.time)).toEqual([1000, 1000, 11000, 11000]);
+  });
+  test("aborting during a rate-limit cooldown prevents another fetch", async () => {
+    const clock = new FakeClock();
+    const controller = new AbortController();
+    let requests = 0;
+    const client = new InfoClient(
+      "testnet",
+      (async () => {
+        requests++;
+        return new Response(null, { status: 429 });
+      }) as unknown as typeof fetch,
+      900,
+      restClock(clock),
+    );
+    const result = client.request(
+      { type: "meta" },
+      { signal: controller.signal },
+    );
+    await flushMicrotasks();
+    expect(clock.jobs.size).toBe(1);
+    controller.abort(new Error("Cancelled cooldown"));
+    await expect(result).rejects.toThrow("Cancelled cooldown");
+    await advanceRestClock(clock, 10_000);
+    expect(requests).toBe(1);
+    expect(clock.jobs.size).toBe(0);
+  });
+  test("does not retry other HTTP failures", async () => {
+    let requests = 0;
+    const client = new InfoClient("testnet", (async () => {
+      requests++;
+      return new Response("unavailable", { status: 503 });
+    }) as unknown as typeof fetch);
+    await expect(client.request({ type: "meta" })).rejects.toThrow("503 unavailable");
+    expect(requests).toBe(1);
   });
 });
