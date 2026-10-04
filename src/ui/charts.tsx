@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Box } from "gloomberb/ui";
+import { Box, useUiCapabilities } from "gloomberb/ui";
 import {
   CompositeChart,
   PaneStatusBody,
@@ -61,13 +61,20 @@ export function CandleChart({
     ],
     [points, snapshot.market?.coin, snapshot.market?.symbol],
   );
+  const native = useUiCapabilities().nativePaneChrome;
   const position = account?.positions.find(
     (p) => p.coin === snapshot.market?.coin,
   );
-  // Entry and liquidation keep full strength; resting orders are context, so
-  // a grid of them stays behind the candles instead of burying them.
-  const orderColor = (buy: boolean) =>
-    blendHex(colors.bg, buy ? colors.positive : colors.negative, 0.45);
+  // Levels draw over the candles. Resting orders are context: on the desktop
+  // a translucent side colour lets the candles show through where a line
+  // crosses them; the terminal has no translucency, so it gets a dimmed blend.
+  // Entry and liquidation keep full strength.
+  const orderColor = (buy: boolean) => {
+    const side = buy ? colors.positive : colors.negative;
+    return native && /^#[0-9a-f]{6}$/i.test(side)
+      ? `${side}80`
+      : blendHex(colors.bg, side, 0.6);
+  };
   const levels = [
     ...(position
       ? [
@@ -83,7 +90,7 @@ export function CandleChart({
                 {
                   id: "liquidation",
                   value: Number(position.liquidationPx),
-                  color: colors.negative,
+                  color: colors.warning,
                   editable: false,
                   actionable: false,
                 },
