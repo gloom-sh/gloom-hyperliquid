@@ -5,6 +5,7 @@ import {
   QueryBar,
   usePaneTabs,
   useQueryBarSearch,
+  type DataTableCell,
   type DataTableColumn,
 } from "gloomberb/components";
 import {
@@ -16,28 +17,38 @@ import {
 import { colors } from "gloomberb/theme";
 import type { PaneProps } from "gloomberb/types/plugin";
 import type { Market } from "../market";
-import { compact, number, percent, price, tone } from "./format";
+import {
+  compact,
+  fundingRate,
+  missing,
+  number,
+  percent,
+  price,
+  tone,
+} from "./format";
 import { useAccount, useBoard, useLiveFooter } from "./hooks";
 import { MarketView, HyperliquidMarketPane } from "./market";
 
-export const MARKET_COLUMNS: DataTableColumn[] = [
-  { id: "coin", label: "Market", width: 17, align: "left" },
-  { id: "dex", label: "DEX", width: 8, align: "left" },
-  { id: "assetClass", label: "Class", width: 13, align: "left" },
-  { id: "mark", label: "Mark", width: 13, align: "right" },
-  { id: "change24h", label: "24h rolling %", width: 14, align: "right" },
-  { id: "fundingHourly", label: "Current /1h", width: 12, align: "right" },
-  { id: "fundingApr", label: "Simple APR", width: 11, align: "right" },
-  { id: "oiUsd", label: "OI USD", width: 12, align: "right" },
-  { id: "volume24h", label: "24h vol USD", width: 12, align: "right" },
-  { id: "oracle", label: "Oracle", width: 13, align: "right" },
-  { id: "premium", label: "Premium %", width: 11, align: "right" },
-  { id: "funding8h", label: "Current /8h", width: 12, align: "right" },
-  { id: "oiCoin", label: "OI coin", width: 14, align: "right" },
-  { id: "oiVolume", label: "OI / vol", width: 10, align: "right" },
-  { id: "maxLeverage", label: "Max lev", width: 9, align: "right" },
+// Trader order: what it is, where it trades, what it costs to hold, how deep
+// it is. Venue and class come last; the class tabs already filter by class.
+const MARKET_COLUMNS: DataTableColumn[] = [
+  { id: "coin", label: "Market", width: 14, align: "left" },
+  { id: "mark", label: "Mark", width: 11, align: "right" },
+  { id: "change24h", label: "24h %", width: 9, align: "right" },
+  { id: "fundingHourly", label: "Funding /1h", width: 11, align: "right" },
+  { id: "fundingApr", label: "Funding APR", width: 11, align: "right" },
+  { id: "volume24h", label: "24h vol USD", width: 11, align: "right" },
+  { id: "oiUsd", label: "OI USD", width: 10, align: "right" },
+  { id: "premium", label: "Premium", width: 9, align: "right" },
+  { id: "oracle", label: "Oracle", width: 11, align: "right" },
+  { id: "maxLeverage", label: "Max lev", width: 7, align: "right" },
+  { id: "assetClass", label: "Class", width: 8, align: "left" },
+  { id: "dex", label: "DEX", width: 7, align: "left" },
+  { id: "funding8h", label: "Funding /8h", width: 11, align: "right" },
+  { id: "oiCoin", label: "OI coin", width: 11, align: "right" },
+  { id: "oiVolume", label: "OI / vol", width: 8, align: "right" },
   { id: "onlyIsolated", label: "Margin", width: 10, align: "left" },
-  { id: "collateral", label: "Collateral", width: 11, align: "left" },
+  { id: "collateral", label: "Collateral", width: 10, align: "left" },
 ];
 const CLASSES = [
   "All",
@@ -50,7 +61,7 @@ const CLASSES = [
   "Favorites",
   "My positions",
 ];
-export function marketCell(row: Market, id: string) {
+function marketCell(row: Market, id: string): DataTableCell {
   const value = row[id as keyof Market];
   if (
     [
@@ -62,12 +73,15 @@ export function marketCell(row: Market, id: string) {
     ].includes(id)
   )
     return {
-      text: percent(
+      text:
+        id === "fundingHourly" || id === "funding8h"
+          ? fundingRate(value as number | null)
+          : percent(value as number | null),
+      value: value == null ? null : Number(value) * 100,
+      color: tone(
         value as number | null,
         id === "fundingHourly" || id === "funding8h" ? 4 : 2,
       ),
-      value: value == null ? null : Number(value) * 100,
-      color: tone(value as number | null),
     };
   if (id === "mark" || id === "oracle")
     return {
@@ -83,18 +97,15 @@ export function marketCell(row: Market, id: string) {
   if (id === "maxLeverage")
     return { text: `${row.maxLeverage}x`, value: row.maxLeverage };
   if (id === "onlyIsolated")
-    return { text: row.onlyIsolated ? "Isolated" : "Cross / iso" };
-  if (id === "assetClass")
-    return {
-      text: `${row.assetClass}${["Stocks", "Indices", "Energy", "Metals", "FX"].includes(row.assetClass) ? " 24/7" : ""}`,
-    };
+    return { text: row.onlyIsolated ? "Isolated" : "Cross/iso" };
   if (id === "oiVolume")
     return {
-      text: value == null ? "--" : `${number(value as number)}x`,
+      text: value == null ? missing : `${number(value as number)}x`,
       value: value as number | null,
     };
   if (id === "dex") return { text: row.dex || "Native", color: colors.textDim };
-  return { text: String(value ?? "--") };
+  if (id === "assetClass") return { text: row.assetClass, color: colors.textDim };
+  return { text: String(value ?? missing) };
 }
 export function HyperliquidBoardPane(props: PaneProps) {
   const [market] = usePaneSettingValue<string>("market", "");
@@ -116,7 +127,11 @@ function Board(props: PaneProps) {
   }, [board.markets, flashClock]);
   const account = useAccount();
   const app = usePluginAppActions();
-  const [category, setCategory] = usePluginPaneState("category", "All");
+  const [initialClass] = usePaneSettingValue<string>("assetClass", "All");
+  const [category, setCategory] = usePluginPaneState(
+    "category",
+    CLASSES.includes(initialClass) ? initialClass : "All",
+  );
   const [query, setQuery] = usePluginPaneState("query", "");
   const [dex, setDex] = usePluginPaneState("dex", "all");
   const [minVolume, setMinVolume] = usePluginConfigState("minVolumeUsd", 0);
@@ -242,7 +257,11 @@ function Board(props: PaneProps) {
     if (column.id === "coin")
       return {
         ...cell,
-        text: `${favoritesRef.current.includes(row.coin) ? "* " : ""}${row.coin}`,
+        // A fixed gutter keeps names aligned whether or not a row is starred.
+        text: favoritesRef.current.length
+          ? `${favoritesRef.current.includes(row.coin) ? "*" : " "} ${row.coin}`
+          : row.coin,
+        value: row.coin,
         color: colors.textBright,
       };
     if (column.id === "mark")
@@ -288,7 +307,7 @@ function Board(props: PaneProps) {
                 value: dex,
                 defaultValue: "all",
                 options: [
-                  { value: "all", label: "All DEXes" },
+                  { value: "all", label: "All" },
                   ...Array.from(new Set(board.markets.map((m) => m.dex))).map(
                     (value) => ({ value, label: value || "Native" }),
                   ),
@@ -320,8 +339,9 @@ function Board(props: PaneProps) {
       getItemKey={(row) => row.coin}
       renderCell={renderCell}
       selectedTextOverridesCellColor
+      freezeFirstColumn
       getRowVersion={(row) =>
-        `${row.asOf}:${row.mark}:${favorites.includes(row.coin)}:${!!row.tickDirection && Date.now() - row.priceTime < 750}`
+        `${row.asOf}:${row.mark}:${favorites.length}:${favorites.includes(row.coin)}:${!!row.tickDirection && Date.now() - row.priceTime < 750}`
       }
       selection={{
         kind: "id",
@@ -363,8 +383,22 @@ function Board(props: PaneProps) {
           />
         ) : undefined
       }
-      emptyStateTitle="No markets match these filters."
-      emptyStateHint="Change the class, DEX, or minimum volume."
+      emptyStateTitle={
+        category === "Favorites" && !favorites.length
+          ? "No favorite markets."
+          : category === "My positions" && !account.account?.positions.length
+            ? "No open positions."
+            : "No markets match these filters."
+      }
+      emptyStateHint={
+        category === "Favorites" && !favorites.length
+          ? "Press f on a market to add it."
+          : category === "My positions" && !account.account
+            ? "Watch an address or connect a wallet."
+            : category === "My positions"
+              ? undefined
+              : "Change the class, DEX, or minimum volume."
+      }
       virtualize
     />
   );

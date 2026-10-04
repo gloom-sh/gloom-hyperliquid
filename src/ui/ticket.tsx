@@ -38,7 +38,14 @@ import type {
   TradingResult,
 } from "../trading/types";
 import { configuredBuilder } from "../trading/builder";
-import { number, price, shortAddress, usd } from "./format";
+import {
+  missing,
+  number,
+  price,
+  shortAddress,
+  size,
+  usd,
+} from "./format";
 import { useAccount } from "./hooks";
 
 const ORDER_KINDS: { value: TicketRequest["kind"]; label: string }[] = [
@@ -70,7 +77,7 @@ interface Draft {
   scaleCount: number;
 }
 
-/** Leverage is a domain control: the exact value is also editable in the shared field grid. */
+/** Leverage is a domain control: drag or click the track, or step it with the arrow keys while it is active. */
 function LeverageSlider({
   value,
   max,
@@ -125,17 +132,20 @@ function LeverageSlider({
   );
   const ratio = ((value - 1) / Math.max(1, max - 1)) * 100;
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text fg={colors.textDim}>Leverage</Text>
-        <Text fg={colors.textBright}>
-          {value}x / {max}x
-        </Text>
-      </Box>
+    <Box
+      flexDirection="row"
+      paddingX={1}
+      gap={1}
+      alignItems="center"
+      width={Math.min(width + 2, 64)}
+    >
+      <Text fg={focused ? colors.textBright : colors.textDim}>Leverage</Text>
       <Box
         ref={track}
         height={1}
-        width="100%"
+        flexGrow={1}
+        flexBasis={0}
+        minWidth={4}
         position="relative"
         cursor="pointer"
         backgroundColor={colors.border}
@@ -160,7 +170,6 @@ function LeverageSlider({
             ? {
                 height: "4px",
                 minHeight: "4px",
-                margin: "9px 0",
                 borderRadius: "2px",
               }
             : undefined
@@ -169,28 +178,44 @@ function LeverageSlider({
         <Box
           height={1}
           width={`${ratio}%`}
-          backgroundColor={colors.borderFocused}
-          style={native ? { height: "4px", minHeight: "4px" } : undefined}
+          backgroundColor={
+            native
+              ? focused
+                ? colors.textBright
+                : colors.borderFocused
+              : colors.textDim
+          }
+          style={
+            native
+              ? { height: "4px", minHeight: "4px", borderRadius: "2px" }
+              : undefined
+          }
         />
         <Box
           position="absolute"
-          left={`${Math.min(97, ratio)}%`}
+          left={native ? `${ratio}%` : `${Math.min(97, ratio)}%`}
           height={1}
           width={1}
           backgroundColor={colors.textBright}
           style={
             native
               ? {
-                  width: "10px",
-                  height: "10px",
-                  minHeight: "10px",
-                  top: "-3px",
+                  width: "12px",
+                  height: "12px",
+                  minHeight: "12px",
+                  top: "-4px",
+                  marginLeft: "-6px",
                   borderRadius: "50%",
+                  boxShadow: focused
+                    ? `0 0 0 3px ${colors.borderFocused}`
+                    : undefined,
                 }
               : undefined
           }
         />
       </Box>
+      <Text fg={colors.textBright}>{`${value}x`}</Text>
+      <Text fg={colors.textDim}>{`/ ${max}x`}</Text>
     </Box>
   );
 }
@@ -212,6 +237,7 @@ export function OrderTicket({
   const account = useAccount();
   const app = usePluginAppActions();
   const dialog = useDialog();
+  const native = useUiCapabilities().nativePaneChrome;
   const [defaultUnit] = usePluginConfigState<TicketRequest["sizeUnit"]>(
     "sizeUnit",
     "usd",
@@ -464,23 +490,25 @@ export function OrderTicket({
     }),
     [busy, message, error],
   );
+  const unitLabel =
+    draft.sizeUnit === "coin"
+      ? market.symbol
+      : draft.sizeUnit === "usd"
+        ? "USD"
+        : "%";
+  const priceText = (value: number) =>
+    value > 0 ? price(value, market.szDecimals) : missing;
   const fields: GridField[] = [
     {
       id: "size",
-      label: `Size (${draft.sizeUnit === "coin" ? market.symbol : draft.sizeUnit === "usd" ? "USD" : "% buying power"})`,
+      label: "Size",
       value: draft.size,
+      valueText:
+        draft.sizeUnit === "coin"
+          ? size(draft.size, market.szDecimals)
+          : number(draft.size, draft.sizeUnit === "usd" ? 2 : 0),
+      suffix: unitLabel,
       onValue: (value) => set("size", value),
-    },
-    {
-      id: "leverage",
-      label: "Leverage",
-      value: draft.leverage,
-      suffix: "x",
-      onValue: (value) =>
-        set(
-          "leverage",
-          Math.max(1, Math.min(market.maxLeverage, Math.round(value))),
-        ),
     },
     ...(draft.kind.includes("limit")
       ? [
@@ -488,6 +516,7 @@ export function OrderTicket({
             id: "limit",
             label: "Limit price",
             value: draft.limitPrice,
+            valueText: priceText(draft.limitPrice),
             onValue: (value: number) => set("limitPrice", value),
           },
         ]
@@ -498,6 +527,7 @@ export function OrderTicket({
             id: "trigger",
             label: "Trigger price",
             value: draft.triggerPrice,
+            valueText: priceText(draft.triggerPrice),
             onValue: (value: number) => set("triggerPrice", value),
           },
         ]
@@ -506,8 +536,10 @@ export function OrderTicket({
       ? [
           {
             id: "twap",
-            label: "Duration (min)",
+            label: "Duration",
             value: draft.twapMinutes,
+            valueText: String(draft.twapMinutes),
+            suffix: "min",
             onValue: (value: number) => set("twapMinutes", Math.round(value)),
           },
         ]
@@ -518,18 +550,21 @@ export function OrderTicket({
             id: "scaleStart",
             label: "First price",
             value: draft.scaleStart,
+            valueText: priceText(draft.scaleStart),
             onValue: (v: number) => set("scaleStart", v),
           },
           {
             id: "scaleEnd",
             label: "Last price",
             value: draft.scaleEnd,
+            valueText: priceText(draft.scaleEnd),
             onValue: (v: number) => set("scaleEnd", v),
           },
           {
             id: "scaleCount",
             label: "Orders",
             value: draft.scaleCount,
+            valueText: String(draft.scaleCount),
             onValue: (v: number) => set("scaleCount", Math.round(v)),
           },
         ]
@@ -538,15 +573,17 @@ export function OrderTicket({
       id: "tp",
       label: "Take profit",
       value: draft.takeProfit,
-      placeholder: "Optional",
+      valueText: priceText(draft.takeProfit),
       onValue: (value) => set("takeProfit", value),
+      onClear: () => set("takeProfit", 0),
     },
     {
       id: "sl",
       label: "Stop loss",
       value: draft.stopLoss,
-      placeholder: "Optional",
+      valueText: priceText(draft.stopLoss),
       onValue: (value) => set("stopLoss", value),
+      onClear: () => set("stopLoss", 0),
     },
   ];
   useFieldRing({
@@ -595,36 +632,99 @@ export function OrderTicket({
       scope: "hyperliquid-ticket-submit",
     },
   );
+  const wideTicket = width >= 50;
+  // A terminal row is a whole line of the ticket column; the desktop keeps
+  // breathing room around the action buttons.
+  const actionPadding = native ? 1 : 0;
+  const unitFilter = {
+    id: "unit",
+    label: "Unit",
+    value: draft.sizeUnit,
+    options: [
+      { value: "usd", label: "USD" },
+      { value: "coin", label: market.symbol },
+      { value: "percent", label: "% buying power" },
+    ],
+    onChange: (value: string) =>
+      set("sizeUnit", value as TicketRequest["sizeUnit"]),
+  };
+  const tifFilter = {
+    id: "tif",
+    label: "TIF",
+    value: draft.tif,
+    options: [
+      { value: "Gtc", label: "GTC" },
+      { value: "Alo", label: "Post only" },
+      { value: "Ioc", label: "IOC" },
+    ],
+    onChange: (value: string) => set("tif", value as Draft["tif"]),
+  };
+  const showTif = draft.kind.includes("limit") || draft.kind === "scale";
+  const orderFilters = [
+    {
+      id: "kind",
+      label: "Order",
+      value: draft.kind,
+      options: ORDER_KINDS,
+      onChange: (value: TicketRequest["kind"]) => set("kind", value),
+    },
+    {
+      id: "margin",
+      label: "Margin",
+      value: ticket.marginMode,
+      options: [
+        {
+          value: "cross",
+          label: "Cross",
+          disabled: market.onlyIsolated,
+        },
+        { value: "isolated", label: "Isolated" },
+      ],
+      onChange: (value: "cross" | "isolated") => set("marginMode", value),
+    },
+  ];
+  const builder = configuredBuilder(account.network);
+  const estimates = [
+    { label: "Order value", value: usd(preview?.notional) },
+    { label: "Margin", value: usd(preview?.marginRequired) },
+    ticket.marginMode === "cross"
+      ? { label: "Est. liquidation", value: missing, detail: "cross" }
+      : {
+          label: "Est. liquidation",
+          value: price(preview?.liquidationPrice, market.szDecimals),
+        },
+    {
+      label: account.account?.fees ? "Est. fee" : "Est. base fee",
+      value: usd(preview?.fee),
+    },
+    ...(draft.kind === "market"
+      ? [
+          {
+            label: "Average fill",
+            value: price(preview?.averageFill, market.szDecimals),
+          },
+          {
+            label: "Est. slippage",
+            value:
+              preview?.slippagePercent == null
+                ? missing
+                : `${number(preview.slippagePercent, 3)}%`,
+          },
+        ]
+      : []),
+  ];
   return (
     <Box flexDirection="column" flexGrow={1} flexBasis={0} minHeight={0}>
       <ScrollBox flexGrow={1} contentOptions={{ flexDirection: "column" }}>
         <QueryBar
           width={width}
-          filters={[
-            {
-              id: "kind",
-              label: "Order",
-              value: draft.kind,
-              options: ORDER_KINDS,
-              onChange: (value) => set("kind", value),
-            },
-            {
-              id: "margin",
-              label: "Margin",
-              value: ticket.marginMode,
-              options: [
-                {
-                  value: "cross",
-                  label: "Cross",
-                  disabled: market.onlyIsolated,
-                },
-                { value: "isolated", label: "Isolated" },
-              ],
-              onChange: (value) => set("marginMode", value),
-            },
-          ]}
+          filters={
+            wideTicket
+              ? [...orderFilters, unitFilter, ...(showTif ? [tifFilter] : [])]
+              : orderFilters
+          }
         />
-        <Box paddingX={1} marginTop={1}>
+        <Box paddingX={1}>
           <SegmentedControl
             value={draft.side}
             options={[
@@ -646,7 +746,7 @@ export function OrderTicket({
               label: "Available",
               value: account.account
                 ? number(availableForMarket(account.account, ticket.market))
-                : "--",
+                : missing,
               detail: market.collateral,
             },
           ]}
@@ -659,38 +759,12 @@ export function OrderTicket({
           focused={focused && active === "leverageSlider"}
           width={width - 2}
         />
-        <QueryBar
-          width={width}
-          filters={[
-            {
-              id: "unit",
-              label: "Size",
-              value: draft.sizeUnit,
-              options: [
-                { value: "usd", label: "USD" },
-                { value: "coin", label: market.symbol },
-                { value: "percent", label: "% buying power" },
-              ],
-              onChange: (value) => set("sizeUnit", value),
-            },
-            ...(draft.kind.includes("limit") || draft.kind === "scale"
-              ? [
-                  {
-                    id: "tif",
-                    label: "TIF",
-                    value: draft.tif,
-                    options: [
-                      { value: "Gtc", label: "GTC" },
-                      { value: "Alo", label: "Post only" },
-                      { value: "Ioc", label: "IOC" },
-                    ],
-                    onChange: (value: string) =>
-                      set("tif", value as Draft["tif"]),
-                  },
-                ]
-              : []),
-          ]}
-        />
+        {!wideTicket ? (
+          <QueryBar
+            width={width}
+            filters={[unitFilter, ...(showTif ? [tifFilter] : [])]}
+          />
+        ) : null}
         <FieldGrid
           width={width}
           fields={fields}
@@ -699,9 +773,9 @@ export function OrderTicket({
           onDeactivate={() => setActive(null)}
           focused={focused}
           keyboard={false}
-          columns={width >= 50 ? 2 : 1}
+          columns={wideTicket ? 2 : 1}
         />
-        <Box paddingX={1} marginTop={1}>
+        <Box paddingX={1}>
           <Checkbox
             label="Reduce only"
             active={active === "reduceOnly"}
@@ -714,35 +788,10 @@ export function OrderTicket({
         </Box>
         <StatGrid
           width={width}
-          columns={width >= 50 ? 2 : 1}
-          items={[
-            { label: "Order value", value: usd(preview?.notional) },
-            { label: "Margin", value: usd(preview?.marginRequired) },
-            {
-              label: "Est. liquidation",
-              value:
-                ticket.marginMode === "cross"
-                  ? "--"
-                  : price(preview?.liquidationPrice, market.szDecimals),
-            },
-            {
-              label: account.account?.fees ? "Est. fee" : "Est. base fee",
-              value: usd(preview?.fee),
-            },
-            {
-              label: "Average fill",
-              value: price(preview?.averageFill, market.szDecimals),
-            },
-            {
-              label: "Est. slippage",
-              value:
-                preview?.slippagePercent == null
-                  ? "--"
-                  : `${number(preview.slippagePercent, 3)}%`,
-            },
-          ]}
+          columns={wideTicket ? 2 : 1}
+          items={estimates}
         />
-        {configuredBuilder(account.network) ? (
+        {builder ? (
           <Box paddingX={1}>
             <Text fg={colors.textDim}>including Gloom's 0.1% builder fee</Text>
           </Box>
@@ -760,7 +809,7 @@ export function OrderTicket({
         ) : null}
       </ScrollBox>
       {account.status?.mode !== "trading" ? (
-        <Box paddingX={1} paddingY={1}>
+        <Box paddingX={1} paddingY={actionPadding} flexDirection="row">
           <Button
             label={
               account.status?.mode === "watch"
@@ -774,7 +823,7 @@ export function OrderTicket({
       ) : (
         <Box
           paddingX={1}
-          paddingY={1}
+          paddingY={actionPadding}
           flexDirection="row"
           flexWrap="wrap"
           gap={1}
@@ -800,6 +849,7 @@ export function OrderTicket({
           />
           <Button
             label="Reset"
+            compact
             variant="secondary"
             active={active === "reset"}
             disabled={busy}

@@ -5,10 +5,10 @@ import {
   PaneStatusBody,
   pricePointsToResolvedSeries,
 } from "gloomberb/components";
-import { colors } from "gloomberb/theme";
+import { blendHex, colors } from "gloomberb/theme";
 import type { MarketSnapshot } from "../market";
 import type { AccountSnapshot } from "../trading/types";
-import { compact, price } from "./format";
+import { compactAxis, price, size } from "./format";
 
 export function CandleChart({
   snapshot,
@@ -50,7 +50,7 @@ export function CandleChart({
         points.map((p) => ({ date: p.date, close: p.volume })),
         {
           id: "volume",
-          label: "Volume (coin)",
+          label: `Volume ${snapshot.market?.symbol ?? ""}`.trim(),
           color: colors.textDim,
           unit: "coin",
           style: "columns",
@@ -59,11 +59,15 @@ export function CandleChart({
         },
       ),
     ],
-    [points, snapshot.market?.coin],
+    [points, snapshot.market?.coin, snapshot.market?.symbol],
   );
   const position = account?.positions.find(
     (p) => p.coin === snapshot.market?.coin,
   );
+  // Entry and liquidation keep full strength; resting orders are context, so
+  // a grid of them stays behind the candles instead of burying them.
+  const orderColor = (buy: boolean) =>
+    blendHex(colors.bg, buy ? colors.positive : colors.negative, 0.45);
   const levels = [
     ...(position
       ? [
@@ -92,7 +96,7 @@ export function CandleChart({
       .map((o) => ({
         id: `order-${o.oid}`,
         value: Number(o.isTrigger ? o.triggerPx : o.limitPx),
-        color: o.side === "B" ? colors.positive : colors.negative,
+        color: orderColor(o.side === "B"),
         editable: false,
         actionable: false,
       })) ?? []),
@@ -105,9 +109,15 @@ export function CandleChart({
       minHeight={0}
       overflow="hidden"
     >
+      {/* The live candle can arrive before the history request; one candle
+          is still loading, not a chart. */}
       <PaneStatusBody
-        loading={!points.length && !snapshot.error}
-        error={!points.length ? snapshot.error : null}
+        loading={
+          !snapshot.error &&
+          (points.length === 1 ||
+            (!points.length && snapshot.status !== "live"))
+        }
+        error={points.length < 2 ? snapshot.error : null}
         subject="candles"
         empty={!points.length && snapshot.status === "live"}
         emptyTitle="No candles for this interval."
@@ -129,12 +139,12 @@ export function CandleChart({
           viewportResetKey={snapshot.market?.coin}
           formatAxisValue={(value, axis) =>
             axis.unit === "coin"
-              ? compact(value)
+              ? compactAxis(value)
               : price(value, snapshot.market?.szDecimals)
           }
           formatValue={(v, s) =>
             s.id === "volume"
-              ? v.toLocaleString("en-US", { maximumFractionDigits: 3 })
+              ? size(v, snapshot.market?.szDecimals)
               : price(v, snapshot.market?.szDecimals)
           }
         />

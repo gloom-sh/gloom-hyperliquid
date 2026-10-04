@@ -3,11 +3,12 @@ import { Box } from "gloomberb/ui";
 import {
   Button,
   DataTableView,
-  EmptyState,
+  PaneStatusBody,
   StatGrid,
   TextPromptDialog,
   confirmDialog,
   usePaneTabs,
+  type DataTableCell,
   type DataTableColumn,
 } from "gloomberb/components";
 import { useDialog } from "gloomberb/dialog";
@@ -16,6 +17,7 @@ import {
   usePluginAppActions,
   usePluginPaneState,
 } from "gloomberb/react";
+import { colors } from "gloomberb/theme";
 import type { PaneProps } from "gloomberb/types/plugin";
 import type {
   AccountSnapshot,
@@ -23,7 +25,19 @@ import type {
   TradingOperation,
 } from "../trading/types";
 import { getMarketService } from "../runtime";
-import { dateTime, number, percent, price, tone, usd } from "./format";
+import {
+  amountTone,
+  dateTime,
+  fundingRate,
+  missing,
+  number,
+  percent,
+  price,
+  signed,
+  size,
+  tone,
+  usd,
+} from "./format";
 import { useAccount, useBoard, useLiveFooter } from "./hooks";
 
 type Row = {
@@ -41,85 +55,85 @@ const col = (
 ): DataTableColumn => ({ id, label, width, align });
 const COLUMNS: Record<string, DataTableColumn[]> = {
   Positions: [
-    col("coin", "Market", 17, "left"),
-    col("side", "Side", 6, "left"),
-    col("size", "Size", 15),
-    col("entry", "Entry", 13),
-    col("mark", "Mark", 13),
-    col("pnl", "Unrealized", 15),
-    col("roe", "ROE %", 11),
-    col("liquidation", "Liquidation", 13),
-    col("margin", "Margin", 13),
-    col("leverage", "Leverage", 11),
-    col("funding", "Funding since open", 19),
-    col("collateral", "Collateral", 12, "left"),
+    col("coin", "Market", 14, "left"),
+    col("side", "Side", 5, "left"),
+    col("size", "Size", 13),
+    col("entry", "Entry", 11),
+    col("mark", "Mark", 11),
+    col("pnl", "PnL USD", 12),
+    col("roe", "ROE %", 9),
+    col("liquidation", "Liq. price", 11),
+    col("margin", "Margin", 11),
+    col("leverage", "Leverage", 12, "left"),
+    col("funding", "Funding", 10),
+    col("collateral", "Collateral", 10, "left"),
   ],
   Orders: [
-    col("coin", "Market", 17, "left"),
-    col("side", "Side", 6, "left"),
-    col("type", "Type", 20, "left"),
+    col("coin", "Market", 14, "left"),
+    col("side", "Side", 5, "left"),
+    col("type", "Type", 18, "left"),
     col("size", "Size", 12),
-    col("price", "Price", 13),
-    col("trigger", "Trigger", 13),
-    col("flags", "Flags", 22, "left"),
-    col("time", "Placed UTC", 21, "left"),
-    col("oid", "Order ID", 16),
+    col("price", "Price", 12),
+    col("trigger", "Trigger", 12),
+    col("flags", "Flags", 20, "left"),
+    col("time", "Placed UTC", 19, "left"),
+    col("oid", "Order ID", 12),
   ],
   History: [
-    col("coin", "Market", 17, "left"),
-    col("status", "Status", 24, "left"),
-    col("side", "Side", 6, "left"),
+    col("coin", "Market", 14, "left"),
+    col("status", "Status", 22, "left"),
+    col("side", "Side", 5, "left"),
     col("size", "Size", 12),
-    col("price", "Price", 13),
+    col("price", "Price", 12),
     col("type", "Type", 18, "left"),
-    col("time", "Updated UTC", 21, "left"),
+    col("time", "Updated UTC", 19, "left"),
   ],
   Fills: [
-    col("coin", "Market", 17, "left"),
-    col("direction", "Direction", 20, "left"),
+    col("coin", "Market", 14, "left"),
+    col("direction", "Direction", 14, "left"),
     col("size", "Size", 12),
-    col("price", "Price", 13),
-    col("pnl", "Closed PnL USD", 15),
-    col("fee", "Fee", 12),
-    col("feeToken", "Fee token", 10, "left"),
-    col("liquidity", "Liquidity", 10, "left"),
-    col("time", "Filled UTC", 21, "left"),
+    col("price", "Price", 12),
+    col("pnl", "Closed PnL", 12),
+    col("fee", "Fee", 10),
+    col("feeToken", "Fee token", 9, "left"),
+    col("liquidity", "Liquidity", 9, "left"),
+    col("time", "Filled UTC", 19, "left"),
   ],
   Funding: [
-    col("coin", "Market", 17, "left"),
-    col("payment", "Payment USD", 15),
-    col("rate", "Paid /1h %", 15),
-    col("size", "Position size", 15),
-    col("time", "Paid UTC", 21, "left"),
+    col("coin", "Market", 14, "left"),
+    col("payment", "Payment USD", 13),
+    col("rate", "Rate /1h", 11),
+    col("size", "Position size", 14),
+    col("time", "Paid UTC", 19, "left"),
   ],
   Ledger: [
-    col("type", "Type", 23, "left"),
-    col("amount", "Amount", 18),
-    col("token", "Token", 12, "left"),
-    col("time", "Time UTC", 21, "left"),
+    col("type", "Type", 22, "left"),
+    col("amount", "Amount", 16),
+    col("token", "Token", 8, "left"),
+    col("time", "Time UTC", 19, "left"),
     col("hash", "Transaction", 28, "left"),
   ],
   Balances: [
-    col("coin", "Account / token", 22, "left"),
-    col("value", "Value / total", 18),
-    col("available", "Available", 18),
-    col("held", "Held / margin", 18),
-    col("maintenance", "Maintenance", 18),
-    col("collateral", "Collateral", 12, "left"),
+    col("coin", "Account / token", 20, "left"),
+    col("value", "Value / total", 16),
+    col("available", "Available", 16),
+    col("held", "Held / margin", 16),
+    col("maintenance", "Maintenance", 14),
+    col("collateral", "Collateral", 10, "left"),
   ],
-  Fees: [col("name", "Fee schedule", 28, "left"), col("value", "Rate", 20)],
+  Fees: [col("name", "Fee schedule", 24, "left"), col("value", "Rate", 10)],
   TWAP: [
-    col("coin", "Market", 17, "left"),
-    col("status", "Status", 13, "left"),
+    col("coin", "Market", 14, "left"),
+    col("status", "Status", 12, "left"),
     col("execution", "Execution", 14, "left"),
-    col("side", "Side", 6, "left"),
-    col("size", "Size", 14),
-    col("filled", "Filled", 14),
-    col("minutes", "Minutes", 10),
-    col("nextTime", "Next slice UTC", 21, "left"),
-    col("reduce", "Reduce only", 14, "left"),
-    col("reason", "Detail", 36, "left"),
-    col("id", "TWAP ID", 43, "left"),
+    col("side", "Side", 5, "left"),
+    col("size", "Size", 12),
+    col("filled", "Filled", 12),
+    col("minutes", "Minutes", 8),
+    col("nextTime", "Next slice UTC", 19, "left"),
+    col("reduce", "Reduce only", 11, "left"),
+    col("reason", "Detail", 32, "left"),
+    col("id", "TWAP ID", 40, "left"),
   ],
 };
 function rowsFor(account: AccountSnapshot, tab: string): Row[] {
@@ -306,16 +320,23 @@ export function PositionsTable({
   height,
   focused,
   market,
+  first,
+  loading = false,
 }: {
   account: AccountSnapshot | null;
   width: number;
   height: number;
   focused: boolean;
   market?: string;
+  loading?: boolean;
+  /** Lists this market's position ahead of the rest. */
+  first?: string;
 }) {
   const app = usePluginAppActions();
   const rows = account
-    ? rowsFor(account, "Positions").filter((r) => !market || r.coin === market)
+    ? rowsFor(account, "Positions")
+        .filter((r) => !market || r.coin === market)
+        .sort((a, b) => Number(b.coin === first) - Number(a.coin === first))
     : [];
   return (
     <DataTableView<Row>
@@ -329,64 +350,77 @@ export function PositionsTable({
       sortDirection="asc"
       getItemKey={(r) => r.key}
       renderCell={renderCell}
-      onActivate={(r) => app.createPaneFromTemplate("hyperliquid-account-new")}
+      selectedTextOverridesCellColor
+      onActivate={() => app.createPaneFromTemplate("hyperliquid-account-new")}
+      emptyContent={
+        !account && loading ? (
+          <PaneStatusBody loading subject="positions" />
+        ) : undefined
+      }
       emptyStateTitle={
         account ? "No open positions." : "Connect a wallet or watch an address."
       }
     />
   );
 }
-function renderCell(row: Row, column: DataTableColumn) {
+const DATED_TABS = ["History", "Fills", "Funding", "Ledger"];
+const EMPTY_TITLES: Record<string, string> = {
+  Positions: "No open positions.",
+  Orders: "No open orders.",
+  History: "No order history.",
+  Fills: "No fills.",
+  Funding: "No funding payments.",
+  Ledger: "No deposits, withdrawals or transfers.",
+  Balances: "No balances.",
+  Fees: "Fee schedule unavailable.",
+  TWAP: "No TWAP orders.",
+};
+const PRICE_COLUMNS = ["entry", "mark", "price", "liquidation", "trigger"];
+const SIDE_COLORS: Record<string, string> = {
+  Long: colors.positive,
+  Buy: colors.positive,
+  Short: colors.negative,
+  Sell: colors.negative,
+};
+function renderCell(row: Row, column: DataTableColumn): DataTableCell {
   const value = row[column.id];
   const decimals = typeof row.decimals === "number" ? row.decimals : undefined;
-  if (
-    typeof value === "number" &&
-    ["entry", "mark", "price", "liquidation", "trigger"].includes(column.id)
-  )
-    return { text: price(value, decimals ?? 0), value };
-  if (typeof value === "number" && ["size", "filled"].includes(column.id))
+  if (value == null) return { text: missing, value: null };
+  if (typeof value === "number") {
+    if (PRICE_COLUMNS.includes(column.id))
+      return { text: price(value, decimals ?? 0), value };
+    if (["size", "filled"].includes(column.id))
+      return { text: size(value, decimals), value };
+    if (["pnl", "payment"].includes(column.id))
+      return { text: signed(value), value, color: amountTone(value) };
+    if (column.id === "roe")
+      return {
+        text: percent(value),
+        value: value * 100,
+        color: tone(value, 2),
+      };
+    if (column.id === "rate")
+      return { text: fundingRate(value), value: value * 100 };
+    if (column.id === "fee") return { text: number(value, 4), value };
+    if (["time", "nextTime"].includes(column.id))
+      return { text: dateTime(value), value: new Date(value).toISOString() };
+    // Identifiers are copied and searched, so they keep their digits plain.
+    if (["oid", "id"].includes(column.id))
+      return { text: String(value), value: String(value) };
     return {
-      text: number(value, decimals ?? (Number.isInteger(value) ? 0 : 4)),
+      text: number(value, column.id === "minutes" ? 0 : 2),
       value,
     };
-  return {
-    text:
-      value == null
-        ? "--"
-        : ["time", "nextTime"].includes(column.id)
-          ? dateTime(Number(value))
-          : ["roe", "rate"].includes(column.id)
-            ? percent(Number(value), column.id === "rate" ? 4 : 2)
-            : typeof value === "number"
-              ? number(
-                  value,
-                  ["oid", "id", "minutes"].includes(column.id)
-                    ? 0
-                    : [
-                          "size",
-                          "entry",
-                          "mark",
-                          "price",
-                          "liquidation",
-                          "trigger",
-                          "fee",
-                        ].includes(column.id)
-                      ? Math.abs(value) < 1
-                        ? 6
-                        : 4
-                      : 2,
-                )
-              : String(value),
-    value:
-      typeof value === "number"
-        ? ["roe", "rate"].includes(column.id)
-          ? value * 100
-          : value
-        : undefined,
-    color: ["pnl", "roe", "payment"].includes(column.id)
-      ? tone(Number(value))
-      : undefined,
-  };
+  }
+  if (column.id === "side")
+    return { text: String(value), color: SIDE_COLORS[String(value)] };
+  if (column.id === "status") return { text: statusLabel(String(value)) };
+  return { text: String(value) };
+}
+/** Exchange status ids read as words: `marginCanceled` becomes `Margin canceled`. */
+function statusLabel(value: string) {
+  const words = value.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
   const state = useAccount();
@@ -411,20 +445,25 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pendingAction = useRef(false);
+  // Dated tabs read newest first until the user picks another column.
+  const activeSort =
+    sort.id || !DATED_TABS.includes(tab)
+      ? sort
+      : { id: "time", direction: "desc" as const };
   const rows = useMemo(() => {
     const rows = state.account ? rowsFor(state.account, tab) : [];
-    if (!sort.id) return rows;
+    if (!activeSort.id) return rows;
     return rows.sort((a, b) => {
-      const av = a[sort.id],
-        bv = b[sort.id];
+      const av = a[activeSort.id],
+        bv = b[activeSort.id];
       return (
         (typeof av === "number" && typeof bv === "number"
           ? av - bv
           : String(av ?? "").localeCompare(String(bv ?? ""))) *
-        (sort.direction === "asc" ? 1 : -1)
+        (activeSort.direction === "asc" ? 1 : -1)
       );
     });
-  }, [state.account, tab, sort, board.markets]);
+  }, [state.account, tab, activeSort.id, activeSort.direction, board.markets]);
   const current = rows.find((r) => r.key === selected) ?? rows[0];
   const tabs = usePaneTabs(
     state.account
@@ -439,7 +478,10 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
                   : value,
           })),
           activeValue: tab,
-          onSelect: setTab,
+          onSelect: (value) => {
+            setTab(value);
+            setSort({ id: "", direction: "desc" });
+          },
           focused,
           compact: true,
           dense: true,
@@ -644,12 +686,14 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
     {
       network: state.network,
       status: busy
-        ? "Submitting"
+        ? "submitting"
         : state.account?.stale
           ? "stale"
           : state.account
             ? "live"
-            : "connecting",
+            : state.loading
+              ? "connecting"
+              : undefined,
       asOf: state.account?.updatedAt,
       error: message ?? state.error,
     },
@@ -788,48 +832,56 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
   );
   if (!state.account)
     return (
-      <EmptyState
-        title={
-          state.loading ? "Loading account..." : "Watch or connect a wallet."
-        }
-        hint={
-          state.error ??
-          "Watch-only needs an account address. Trading uses your own wallet."
-        }
+      <PaneStatusBody
+        loading={state.loading}
+        error={state.loading ? null : state.error}
+        errorTitle="Account unavailable."
+        subject="account"
+        empty
+        emptyTitle="No account connected."
+        emptyMessage="Watch a public address or connect your own wallet."
         actions={
-          <Button
-            label="Set up wallet"
-            variant="primary"
-            onPress={() => app.createPaneFromTemplate("hyperliquid-setup-new")}
-          />
+          state.error ? undefined : (
+            <Button
+              label="Set up wallet"
+              variant="primary"
+              onPress={() =>
+                app.createPaneFromTemplate("hyperliquid-setup-new")
+              }
+            />
+          )
         }
       />
     );
   const figures = [
-    { label: "Value (USDC)", value: number(state.account.accountValue) },
-    { label: "Available USDC", value: number(state.account.available) },
-    { label: "Margin USDC", value: number(state.account.marginUsed) },
     {
-      label: "PnL USDC",
-      value: number(state.account.unrealizedPnl),
-      color: tone(state.account.unrealizedPnl),
+      label: "Account value",
+      value: number(state.account.accountValue),
+      detail: "USDC",
+    },
+    { label: "Available", value: number(state.account.available) },
+    { label: "Margin used", value: number(state.account.marginUsed) },
+    {
+      label: "Unrealized PnL",
+      value: signed(state.account.unrealizedPnl),
+      color: amountTone(state.account.unrealizedPnl),
     },
     ...(height >= 20
       ? [
           {
-            label: "Withdrawable USDC",
+            label: "Withdrawable",
             value: number(state.account.withdrawable),
           },
           {
-            label: "Cross margin",
-            value: percent(state.account.crossMarginRatio, 2, false),
-          },
-          {
-            label: "Maint. USDC",
+            label: "Maintenance",
             value: number(state.account.maintenanceMargin),
           },
           {
-            label: "Account mode",
+            label: "Margin ratio",
+            value: percent(state.account.crossMarginRatio, 2, false),
+          },
+          {
+            label: "Mode",
             value:
               state.account.abstraction === "default" ||
               state.account.abstraction === "disabled"
@@ -863,13 +915,16 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
         getId: (r) => r.key,
         onChange: setSelected,
       }}
-      sortColumnId={sort.id || null}
-      sortDirection={sort.direction}
+      sortColumnId={activeSort.id || null}
+      sortDirection={activeSort.direction}
       onHeaderClick={(id) =>
-        setSort((old) => ({
+        setSort({
           id,
-          direction: old.id === id && old.direction === "desc" ? "asc" : "desc",
-        }))
+          direction:
+            activeSort.id === id && activeSort.direction === "desc"
+              ? "asc"
+              : "desc",
+        })
       }
       onActivate={(row) =>
         row.coin &&
@@ -877,7 +932,7 @@ export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
           symbol: row.coin,
         })
       }
-      emptyStateTitle={`No ${tab.toLowerCase()}.`}
+      emptyStateTitle={EMPTY_TITLES[tab] ?? "Nothing to show."}
     />
   );
 }

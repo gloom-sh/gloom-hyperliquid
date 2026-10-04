@@ -324,15 +324,16 @@ export function useLiveFooter(
                     },
                   ]
                 : []),
-              ...(!auth ||
-              state.status?.toLowerCase() !== authLabel.toLowerCase() ||
-              state.asOf
+              ...(state.status &&
+              (!auth ||
+                state.status.toLowerCase() !== authLabel.toLowerCase() ||
+                state.asOf)
                 ? [
                     {
                       id: "live",
                       parts: [
                         {
-                          text: `${state.status ?? "connecting"}${state.asOf ? ` · ${time(state.asOf)} UTC` : ""}`,
+                          text: `${state.status}${state.asOf ? ` · ${time(state.asOf)} UTC` : ""}`,
                           tone:
                             state.status === "live"
                               ? ("positive" as const)
