@@ -103,6 +103,26 @@ describe("order safety and exchange precision", () => {
       previewTicket({ ...base, leverage: 41 }, context).errors.length,
     ).toBeGreaterThan(0);
   });
+  test("reduce-only percentage tickets preserve exact lots without leaving rounding dust", () => {
+    for (const [positionSize, percent] of [
+      [0.00035, 100],
+      [0.0007, 50],
+      [-0.00035, 100],
+    ]) {
+      const preview = previewTicket(
+        {
+          ...base,
+          side: positionSize! > 0 ? "sell" : "buy",
+          reduceOnly: true,
+          sizeUnit: "percent",
+          size: percent!,
+        },
+        { ...context, positionSize },
+      );
+      expect(preview.errors).toEqual([]);
+      expect(preview.order?.orders[0]?.s).toBe("0.00035");
+    }
+  });
   test("position brackets, scale per-leg minimum, TWAP constraints and fat finger warnings", () => {
     const position = previewTicket(
       { ...base, positionTpsl: true, takeProfit: 70_000, stopLoss: 50_000 },

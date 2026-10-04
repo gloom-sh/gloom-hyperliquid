@@ -154,3 +154,5 @@ Additional public evidence files in the same owner-only verification directory:
 `extra-evidence.json`, `local-twap-evidence.json`, `import-evidence.json`,
 `withdraw-evidence.json`, and `final-evidence.json`. The older
 `trading-security.md` summary has been updated to point to these funded results.
+
+2026-10-04 close regression: reproduced the idle-stop race with a 17-second testnet collateral delay; fixed CLI/pane close, close-all and exact percentage sizing; three full BTC closes, 50% close, limit close/cancel and delayed close-all during pane removal passed; final REST/WS checks show zero positions/orders/TWAPs (498.560973 mock USDC); typecheck, 84 tests/413 assertions and doctor pass; evidence: `close-matrix-fixed.json`, `closeall-regression.json`, `close-final-evidence.json` in the same verification directory.

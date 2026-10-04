@@ -145,14 +145,18 @@ export function previewTicket(
       (context.available * (input / 100)) /
       (m.mark / ticket.leverage +
         sizingPrice * (Math.max(feeRate, 0) + builderRate));
-    let rawSize =
+    let rawSize: number | string =
       ticket.sizeUnit === "coin"
         ? input
         : ticket.sizeUnit === "usd"
           ? input / sizingPrice
           : budgetSize;
     if (reduce && ticket.sizeUnit === "percent")
-      rawSize = (Math.abs(context.positionSize ?? 0) * input) / 100;
+      rawSize = new Decimal(context.positionSize ?? 0)
+        .abs()
+        .mul(input)
+        .div(100)
+        .toFixed();
     result.size = roundSize(rawSize, m.szDecimals);
     const size = Number(result.size),
       px = Number(result.price);

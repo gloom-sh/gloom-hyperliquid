@@ -1,6 +1,7 @@
 import { ExchangeClient } from "@nktkas/hyperliquid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { getAddress, isAddress } from "viem";
+import Decimal from "decimal.js";
 import type {
   OrderParameters,
   ModifyParameters,
@@ -122,8 +123,11 @@ export class TradingService {
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
+    this.scheduleIdle();
     void this.ready
-      .then(() => this.activate())
+      .then(() => {
+        if (this.listeners.has(listener)) return this.activate();
+      })
       .catch((error) => {
         this.status.error = errorText(error);
         this.emit();
@@ -168,7 +172,11 @@ export class TradingService {
       return this.accounts.setAddress(this.status.address);
   }
   private suspend(force = false) {
-    if (!force && this.twaps?.getJobs().some((j) => j.status === "running"))
+    if (
+      !force &&
+      (this.signedInFlight > 0 ||
+        this.twaps?.getJobs().some((j) => j.status === "running"))
+    )
       return;
     if (this.lease) clearTimeout(this.lease);
     this.lease = undefined;
@@ -176,13 +184,21 @@ export class TradingService {
     this.marketRelease = undefined;
     this.accounts.stop();
   }
+  private scheduleIdle() {
+    if (this.lease) clearTimeout(this.lease);
+    this.lease = undefined;
+    // Idle starts after the last trading request settles. Stopping account
+    // tracking during a collateral read invalidates its account identity guard.
+    if (this.closed || this.listeners.size || this.signedInFlight > 0) return;
+    this.lease = setTimeout(() => {
+      this.lease = undefined;
+      this.suspend();
+    }, 15_000);
+    this.lease.unref();
+  }
   private touch() {
     this.assertOpen();
-    if (!this.listeners.size) {
-      if (this.lease) clearTimeout(this.lease);
-      this.lease = setTimeout(() => this.suspend(), 15_000);
-      this.lease.unref();
-    }
+    this.scheduleIdle();
     return this.activate();
   }
   private emit() {
@@ -789,7 +805,10 @@ export class TradingService {
       return await this.execute(operation, payload);
     } finally {
       if (transitions) this.transitioning = false;
-      if (signed) this.signedInFlight--;
+      if (signed) {
+        this.signedInFlight--;
+        this.scheduleIdle();
+      }
     }
   }
   private async execute(
@@ -1079,7 +1098,7 @@ export class TradingService {
             side: Number(position.szi) > 0 ? "sell" : "buy",
             kind: payload.kind ?? "market",
             limitPrice: payload.limitPrice,
-            size: (Math.abs(Number(position.szi)) * percent) / 100,
+            size: new Decimal(position.szi).abs().mul(percent).div(100).toFixed(),
             sizeUnit: "coin",
             leverage: position.leverage.value,
             marginMode: position.leverage.type,
