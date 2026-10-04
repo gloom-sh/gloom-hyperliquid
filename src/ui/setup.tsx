@@ -26,7 +26,7 @@ import type { PaneProps } from "gloomberb/types/plugin";
 import { colors } from "gloomberb/theme";
 import type { WalletSession } from "../trading/types";
 import { configuredBuilder } from "../trading/builder";
-import { dateTime } from "./format";
+import { dateTime, number } from "./format";
 import { useAccount, useLiveFooter, useNetwork } from "./hooks";
 
 export function HyperliquidSetupPane({ focused, width }: PaneProps) {
@@ -184,14 +184,9 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
     "hyperliquid-setup",
     {
       network,
-      status: busy
-        ? "Working"
-        : (message ??
-          (state.status?.mode === "trading"
-            ? "Connected"
-            : state.status?.mode === "watch"
-              ? "Watch-only"
-              : "Read-only")),
+      // The auth segment already names the connection; this one carries only
+      // progress and the last result.
+      status: busy ? "working" : (message ?? undefined),
       error: error ?? state.error,
     },
     [
@@ -258,25 +253,58 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
   return (
     <Box flexGrow={1} flexDirection="column" minHeight={0}>
       {tabs.strip}
+      <QueryBar
+        width={width}
+        filters={[
+          {
+            id: "network",
+            label: "Network",
+            value: network,
+            options: [
+              { value: "mainnet", label: "Mainnet" },
+              { value: "testnet", label: "Testnet" },
+            ],
+            onChange: setNetwork,
+          },
+          ...(tab === "Settings"
+            ? [
+                {
+                  id: "sizeUnit",
+                  label: "Default size",
+                  value: sizeUnit,
+                  options: [
+                    { value: "usd", label: "USD" },
+                    { value: "coin", label: "Coin" },
+                    { value: "percent", label: "% buying power" },
+                  ],
+                  onChange: setSizeUnit,
+                },
+                {
+                  id: "leverageBehavior",
+                  label: "Leverage",
+                  value: leverageBehavior,
+                  options: [
+                    {
+                      value: "position",
+                      label: "Position or default",
+                    },
+                    { value: "default", label: "Default" },
+                  ],
+                  onChange: setLeverageBehavior,
+                },
+              ]
+            : []),
+        ]}
+      />
       <ScrollBox
         flexGrow={1}
-        contentOptions={{ flexDirection: "column", padding: 1, gap: 1 }}
+        // Sections bring their own top margin; the body adds no gap of its own.
+        contentOptions={{
+          flexDirection: "column",
+          paddingX: 1,
+          paddingBottom: 1,
+        }}
       >
-        <QueryBar
-          width={width - 2}
-          filters={[
-            {
-              id: "network",
-              label: "Network",
-              value: network,
-              options: [
-                { value: "mainnet", label: "Mainnet" },
-                { value: "testnet", label: "TESTNET" },
-              ],
-              onChange: setNetwork,
-            },
-          ]}
-        />
         {state.status?.address ? (
           <Section title="Connection">
             <KeyValueRow label="Account" value={state.status.address} />
@@ -324,7 +352,7 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
             }
           >
             {acknowledgment}
-            <Box marginTop={1} ref={ring.nodeRef("save")}>
+            <Box marginTop={1} flexDirection="row" ref={ring.nodeRef("save")}>
               <Button
                 label={busy ? "Preparing approval..." : "Connect wallet"}
                 variant="primary"
@@ -338,18 +366,19 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
           <Section title="Watch an account">
             <Box ref={ring.nodeRef("address")}>
               <TextField
-                label="Account address"
+                label="Address"
+                labelWidth={9}
                 value={address}
                 onChange={setAddress}
                 focused={focused && active === "address"}
                 active={active === "address"}
                 onMouseDown={() => setActive("address")}
                 placeholder="0x..."
-                width={Math.min(width - 4, 64)}
+                width={Math.min(width - 4, 56)}
                 onSubmit={() => void watch()}
               />
             </Box>
-            <Box marginTop={1} ref={ring.nodeRef("save")}>
+            <Box marginTop={1} flexDirection="row" ref={ring.nodeRef("save")}>
               <Button
                 label={busy ? "Saving..." : "Watch account"}
                 variant="primary"
@@ -360,54 +389,21 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
           </Section>
         ) : null}
         {tab === "Advanced" ? (
-          <Section title="Existing API wallet">
-            <Text wrapText>
-              Import an existing API wallet through the native command line.
-              Supply the key through a protected file or standard input; never
-              paste it into a pane or command argument.
+          <Section title="Existing API Wallet">
+            <Text wrapText fg={colors.textDim}>
+              Import an approved API wallet from the command line, with the key
+              in a protected file or standard input. Never paste it into a pane
+              or a command argument.
             </Text>
             <Text selectable wrapText fg={colors.textBright}>
               gloomberb hyperliquid import-key --network {network} --key-file
               /private/path/trading.key --address 0xYOUR_ACCOUNT_ADDRESS --yes
               --acknowledge-risk --eligible
             </Text>
-            <Text wrapText fg={colors.textDim}>
-              The wallet guide documents import, expiry, key storage, and
-              revocation.
-            </Text>
           </Section>
         ) : null}
         {tab === "Settings" ? (
           <Section title="Trading settings">
-            <QueryBar
-              width={width - 4}
-              filters={[
-                {
-                  id: "sizeUnit",
-                  label: "Default size",
-                  value: sizeUnit,
-                  options: [
-                    { value: "usd", label: "USD" },
-                    { value: "coin", label: "Coin" },
-                    { value: "percent", label: "% buying power" },
-                  ],
-                  onChange: setSizeUnit,
-                },
-                {
-                  id: "leverageBehavior",
-                  label: "Leverage",
-                  value: leverageBehavior,
-                  options: [
-                    {
-                      value: "position",
-                      label: "Existing position or default",
-                    },
-                    { value: "default", label: "Default" },
-                  ],
-                  onChange: setLeverageBehavior,
-                },
-              ]}
-            />
             <FieldGrid
               width={width - 4}
               focused={focused}
@@ -419,33 +415,41 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
               fields={[
                 {
                   id: "slippage",
-                  label: "Slippage cap (bp)",
+                  label: "Slippage cap",
                   value: Number(slippage),
+                  valueText: number(Number(slippage), 0),
+                  suffix: "bp",
                   onValue: setSlippage,
                 },
                 {
                   id: "maxOrder",
-                  label: "Order guard USD",
+                  label: "Order guard",
                   value: Number(maxOrder),
+                  valueText: number(Number(maxOrder), 0),
+                  suffix: "USD",
                   onValue: setMaxOrder,
                 },
                 {
                   id: "fatFinger",
-                  label: "Price guard %",
+                  label: "Price guard",
                   value: Number(fatFinger),
+                  valueText: String(Number(fatFinger)),
+                  suffix: "%",
                   onValue: setFatFinger,
                 },
                 {
                   id: "port",
                   label: "Approval port",
                   value: Number(port),
+                  valueText: Number(port) ? String(port) : "Random",
                   onValue: (value) =>
                     setPort(Math.max(0, Math.min(65535, Math.round(value)))),
                 },
                 {
                   id: "defaultLeverage",
-                  label: "Default leverage",
+                  label: "Leverage",
                   value: Number(defaultLeverage),
+                  valueText: String(Number(defaultLeverage)),
                   suffix: "x",
                   onValue: (value) =>
                     setDefaultLeverage(
@@ -466,6 +470,7 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
             </Box>
             <KeyValueRow
               label="Gloom builder fee"
+              labelWidth={18}
               value={
                 configuredBuilder(network)
                   ? "0.1%, explicit wallet approval required"
@@ -487,8 +492,7 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
             />
             <ExternalLink url={session.url} label="Open wallet approval page" />
             <Text fg={colors.textDim} wrapText>
-              For SSH, forward this loopback port to the same port on your
-              computer, then open the full URL there.
+              Over SSH, forward this port and open the URL on your computer.
             </Text>
           </Section>
         ) : null}
