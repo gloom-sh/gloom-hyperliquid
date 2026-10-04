@@ -439,7 +439,7 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
                 },
                 {
                   id: "port",
-                  label: "Approval port",
+                  label: "Wallet port",
                   value: Number(port),
                   valueText: Number(port) ? String(port) : "Random",
                   onValue: (value) =>

@@ -404,8 +404,11 @@ function renderCell(row: Row, column: DataTableColumn): DataTableCell {
     if (column.id === "fee") return { text: number(value, 4), value };
     if (["time", "nextTime"].includes(column.id))
       return { text: dateTime(value), value: new Date(value).toISOString() };
+    // Identifiers are copied and searched, so they keep their digits plain.
+    if (["oid", "id"].includes(column.id))
+      return { text: String(value), value: String(value) };
     return {
-      text: number(value, ["oid", "id", "minutes"].includes(column.id) ? 0 : 2),
+      text: number(value, column.id === "minutes" ? 0 : 2),
       value,
     };
   }
