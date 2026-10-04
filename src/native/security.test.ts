@@ -37,10 +37,10 @@ test('unknown intent is persisted and never resent after timeout or process rest
     await service.invoke('status');
     const submit=()=>(service as any).once('persistent-intent',['0x12345678901234567890123456789012'],async()=>{sends++;throw new Error('Network timeout');});
     const [first,second]=await Promise.all([submit(),submit()]);expect(first.state).toBe('unknown');expect(second.state).toBe('unknown');expect(sends).toBe(1);
-    service.dispose();
+    await service.dispose();
     const restarted=createTradingService({network:'testnet',dataDir:folder,shared});
-    try{await restarted.invoke('status');const retry=await (restarted as any).once('persistent-intent',[],async()=>{sends++;return {};});expect(retry.state).toBe('unknown');expect(sends).toBe(1);}finally{restarted.dispose();}
-  }finally{service.dispose();await rm(folder,{recursive:true,force:true});}
+    try{await restarted.invoke('status');const retry=await (restarted as any).once('persistent-intent',[],async()=>{sends++;return {};});expect(retry.state).toBe('unknown');expect(sends).toBe(1);}finally{await restarted.dispose();}
+  }finally{await service.dispose();await rm(folder,{recursive:true,force:true});}
 });
 
 test('service setup, status and disconnected account stream stay offline',async()=>{
@@ -50,8 +50,8 @@ test('service setup, status and disconnected account stream stay offline',async(
   try {
     await service.invoke('status');expect(subscribes).toBe(0);expect(requests).toBe(0);
     const release=service.subscribe(()=>{});await Bun.sleep(1);expect(subscribes).toBe(0);release();expect(releases).toBe(0);
-    service.dispose();expect(releases).toBe(0);
-  }finally{service.dispose();await rm(folder,{recursive:true,force:true});}
+    await service.dispose();expect(releases).toBe(0);
+  }finally{await service.dispose();await rm(folder,{recursive:true,force:true});}
 });
 
 test('scripted API-wallet approval signs with main wallet, skips testnet builder and never retries',async()=>{

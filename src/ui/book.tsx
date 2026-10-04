@@ -44,10 +44,10 @@ export function BookView({ snapshot, width, height, focused, onPrice, compactVie
     renderCell={(row, column) => {
       const color = row.side === 'Bid' ? colors.positive : colors.negative;
       if (column.id === 'side') return { text: row.side, color };
-      if (column.id === 'price') return { text: price(row.level.price, snapshot.market?.szDecimals), value: row.level.price, color };
+      if (column.id === 'price') return { text: price(row.level.price, snapshot.market?.szDecimals), value: row.level.price, color, onMouseDown: onPrice ? (event: { stopPropagation?: () => void }) => { event.stopPropagation?.(); onPrice(row.level.price); } : undefined };
       const value = column.id === 'size' ? row.level.size : row.level.totalSize;
       const label = number(value, snapshot.market?.szDecimals ?? 3);
-      return { text: label, value, content: <Box width="100%" height={1} position="relative" justifyContent="flex-end">
+      return { text: label, value, content: <Box width="100%" height={1} position="relative" flexDirection="row" justifyContent="flex-end">
         <Box position="absolute" right={0} top={0} height={1} width={`${Math.max(1, row.level.totalSize / max * 100)}%`} backgroundColor={color} style={native ? { opacity: 0.13 } : undefined} />
         <Text fg={colors.text}>{label}</Text>
       </Box> };

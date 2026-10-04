@@ -30,7 +30,7 @@ export class AccountStore {
   getSnapshot() {if(this.snapshot){const connection=this.shared.ws.getStatus?.();const stale=Boolean(this.snapshot.error)||(connection!==undefined&&connection!=='live')||Date.now()-this.snapshot.updatedAt>150_000;if(stale!==this.snapshot.stale)this.snapshot={...this.snapshot,stale};}return this.snapshot;}
   private emit() {if(this.snapshot)this.snapshot={...this.snapshot};if(!this.emitTimer)this.emitTimer=setTimeout(()=>{this.emitTimer=undefined;for(const listener of this.listeners)listener();},200);}
   async setAddress(address:Address) {
-    if(this.address===address && this.snapshot) return this.getSnapshot()!;
+    if(this.address?.toLowerCase()===address.toLowerCase()) return this.inflight??this.getSnapshot()??this.refresh();
     this.stop();this.address=address;this.states.clear();this.snapshot=undefined;const generation=++this.generation;
     const schedule=()=>{ if(!this.refreshTimer)this.refreshTimer=setTimeout(()=>{this.refreshTimer=undefined;void this.refresh().catch(()=>{});},Math.max(250,120_000-(Date.now()-this.lastRefresh))); };
     const subscribe=(type:string,handler:(data:any)=>void)=>this.unsubs.push(this.shared.ws.subscribe({type,user:address},data=>{if(generation===this.generation)handler(data);},()=>{void this.refresh().catch(()=>{});}));
@@ -57,6 +57,7 @@ export class AccountStore {
       const request=<T>(type:string,extra:Record<string,unknown>={})=>this.shared.info.request<T>({type,user:address,...extra});
       try {
         if(this.shared.refresh&&!this.shared.getSnapshot?.().dexes.length)await this.shared.refresh();
+        if(generation!==this.generation)throw new Error('Account changed.');
         const board=this.shared.getSnapshot?.();
         const dexes=board?.dexes;
         const names=dexes?.length?dexes.map(d=>d.name):[''];
@@ -74,8 +75,8 @@ export class AccountStore {
         if(generation!==this.generation)throw new Error('Account changed.');
         for(const [dex,state] of stateResults)if(!this.states.has(dex)||number(state.time)>=number(this.states.get(dex)?.time))this.states.set(dex,state);
         this.snapshot={address,network:this.network,updatedAt:Date.now(),stale:false,abstraction,...normalizeBalances(this.states,spot,abstraction,this.collateralByDex),orders:[...new Map([...orderResults.flat(),...[...this.ordersByDex.values()].flat()].map(o=>[o.oid,o])).values()],fills,orderHistory,funding,ledger,spot,fees,twaps:[...this.twapsByDex.values()].flat(),notifications:this.snapshot?.notifications??[]};this.emit();return this.snapshot;
-      } catch(error) { if(this.snapshot){this.snapshot.error=error instanceof Error?error.message:'Account refresh failed.';this.snapshot.stale=true;this.emit();}throw error; }
-      finally{this.inflight=undefined;}
+      } catch(error) { if(generation===this.generation&&this.snapshot){this.snapshot.error=error instanceof Error?error.message:'Account refresh failed.';this.snapshot.stale=true;this.emit();}throw error; }
+      finally{if(generation===this.generation)this.inflight=undefined;}
     })();return this.inflight;
   }
   async refreshRisk(dex:string):Promise<AccountSnapshot>{

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataTableStackView, PaneStatusBody, QueryBar, usePaneTabs, useQueryBarSearch, type DataTableColumn } from 'gloomberb/components';
 import { usePaneSettingValue, usePluginAppActions, usePluginConfigState, usePluginPaneState } from 'gloomberb/react';
 import { colors } from 'gloomberb/theme';
@@ -45,6 +45,12 @@ export function HyperliquidBoardPane(props: PaneProps) {
 function Board(props: PaneProps) {
   const { focused, width, height } = props;
   const board = useBoard();
+  const [flashClock, setFlashClock] = useState(Date.now());
+  useEffect(() => {
+    if (!board.markets.some(row => row.tickDirection && Date.now() - row.priceTime < 750)) return;
+    const timer = setTimeout(() => setFlashClock(Date.now()), 250);
+    return () => clearTimeout(timer);
+  }, [board.markets, flashClock]);
   const account = useAccount();
   const app = usePluginAppActions();
   const [category, setCategory] = usePluginPaneState('category', 'All');
@@ -97,7 +103,7 @@ function Board(props: PaneProps) {
       ]} />
     </>}
     columns={MARKET_COLUMNS} items={rows} getItemKey={row => row.coin} renderCell={renderCell}
-    selectedTextOverridesCellColor getRowVersion={row => `${row.asOf}:${row.mark}:${favorites.includes(row.coin)}`}
+    selectedTextOverridesCellColor getRowVersion={row => `${row.asOf}:${row.mark}:${favorites.includes(row.coin)}:${!!row.tickDirection && Date.now() - row.priceTime < 750}`}
     selection={{ kind: 'id', selectedId: selectedMarket?.coin ?? null, getId: row => row.coin, onChange: setSelected }}
     sortColumnId={sort.id} sortDirection={sort.direction} onHeaderClick={id => setSort(previous => ({ id, direction: previous.id === id && previous.direction === 'desc' ? 'asc' : 'desc' }))}
     onActivate={row => setOpen(row.coin)} detailOpen={!!open} onBack={() => setOpen(null)} detailTitle={open ?? ''}

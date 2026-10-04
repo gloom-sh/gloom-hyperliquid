@@ -73,7 +73,7 @@ export function previewTicket(ticket: TicketRequest, context: TicketContext, set
     if (ticket.kind==='twap') {
       if (!Number.isInteger(ticket.twapMinutes) || ticket.twapMinutes!<5 || ticket.twapMinutes!>1440) result.errors.push('TWAP duration must be 5 to 1440 whole minutes.');
       if (ticket.takeProfit || ticket.stopLoss || ticket.positionTpsl) result.errors.push('Attach TP/SL to the position after the TWAP begins.');
-      if (builder) result.errors.push('TWAP does not support a builder fee.');
+      if(builder){result.warnings.push('Runs on this computer while Gloom is open. Closing Gloom pauses remaining slices; resume explicitly. Each slice includes the Gloom builder fee.');if(result.notional<24)result.errors.push('A local TWAP needs at least $24 so each slice clears the minimum order size.');}
       result.twap={twap:{a:m.assetId,b:buy,s:result.size,r:reduce,m:ticket.twapMinutes??5,t:ticket.twapRandomize??true}};
     } else {
       if (ticket.positionTpsl) {

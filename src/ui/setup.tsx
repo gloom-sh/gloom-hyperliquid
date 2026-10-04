@@ -1,19 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, ScrollBox, Text, useRendererHost } from 'gloomberb/ui';
 import { Button, Checkbox, ExternalLink, FieldGrid, KeyValueRow, Notice, QueryBar, Section, TextField, confirmDialog, openUrl, useFieldRing, usePaneTabs } from 'gloomberb/components';
 import { useDialog } from 'gloomberb/dialog';
-import { useInputCapture, usePluginConfigState, usePluginPaneState } from 'gloomberb/react';
+import { useInputCapture, usePaneSettingValue, usePluginConfigState, usePluginPaneState } from 'gloomberb/react';
 import type { PaneProps } from 'gloomberb/types/plugin';
 import { colors } from 'gloomberb/theme';
 import type { WalletSession } from '../trading/types';
 import { configuredBuilder } from '../trading/builder';
-import { dateTime, shortAddress } from './format';
+import { dateTime } from './format';
 import { useAccount, useLiveFooter, useNetwork } from './hooks';
 
 export function HyperliquidSetupPane({ focused, width }: PaneProps) {
   const state = useAccount(); const dialog = useDialog(); const renderer = useRendererHost();
   const [network, setNetwork] = useNetwork();
-  const [tab, setTab] = usePluginPaneState('setupTab', 'Connect');
+  const [defaultTab] = usePaneSettingValue('defaultTab', 'Connect');
+  const [tab, setTab] = usePluginPaneState('setupTab', ['Connect', 'Watch-only', 'Advanced', 'Settings'].find(value => value.toLowerCase() === defaultTab.toLowerCase()) ?? 'Connect');
   const [address, setAddress] = useState('');
   const [risk, setRisk] = useState(false);
   const [eligible, setEligible] = useState(false);
@@ -27,6 +28,9 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
   const [maxOrder, setMaxOrder] = usePluginConfigState('maxOrderUsd', 10_000);
   const [fatFinger, setFatFinger] = usePluginConfigState('fatFingerPercent', 5);
   const [port, setPort] = usePluginConfigState('approvalPort', 0);
+  const [defaultLeverage, setDefaultLeverage] = usePluginConfigState('defaultLeverage', 3);
+  const [sizeUnit, setSizeUnit] = usePluginConfigState('sizeUnit', 'usd');
+  const [leverageBehavior, setLeverageBehavior] = usePluginConfigState('leverageBehavior', 'position');
   useInputCapture(focused && active != null);
   const tabs = usePaneTabs({ tabs: ['Connect', 'Watch-only', 'Advanced', 'Settings'].map(value => ({ value, label: value })), activeValue: tab, onSelect: value => { setTab(value); setActive(null); }, focused: focused && active == null, compact: true });
   const run = async (task: () => Promise<void>) => { if (busy) return; setBusy(true); setError(null); setMessage(null); try { await task(); await state.refresh(); } catch (error) { setError(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); } };
@@ -45,9 +49,9 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
     return () => { stopped = true; clearInterval(timer); };
   }, [session, busy, state.invoke]);
   useEffect(() => { setSession(null); setError(null); }, [network]);
-  const fields = tab === 'Watch-only' ? ['address', 'save'] : tab === 'Settings' ? ['slippage', 'maxOrder', 'fatFinger', 'port', 'confirmations'] : ['risk', 'eligible', 'save'];
+  const fields = tab === 'Watch-only' ? ['address', 'save'] : tab === 'Settings' ? ['slippage', 'maxOrder', 'fatFinger', 'port', 'defaultLeverage', 'confirmations'] : ['risk', 'eligible', 'save'];
   const ring = useFieldRing({ ids: fields, activeId: active, onActivate: setActive, enabled: focused && tab !== 'Advanced', scope: 'hyperliquid-setup', actions: { confirmations: () => setConfirmations(!confirmations), risk: () => setRisk(!risk), eligible: () => setEligible(!eligible), save: () => { void (tab === 'Watch-only' ? watch() : connect()); } } });
-  useLiveFooter('hyperliquid-setup', { network, status: busy ? 'Working' : state.status?.mode === 'trading' ? 'Connected' : state.status?.mode === 'watch' ? 'Watch-only' : 'Read-only', error: error ?? message ?? state.error }, [
+  useLiveFooter('hyperliquid-setup', { network, status: busy ? 'Working' : message ?? (state.status?.mode === 'trading' ? 'Connected' : state.status?.mode === 'watch' ? 'Watch-only' : 'Read-only'), error: error ?? state.error }, [
     ...(state.status?.address ? [{ id: 'disconnect', key: 'd', label: 'isconnect', onPress: () => void disconnect() }, { id: 'wallet', key: 'w', label: 'allet management', onPress: () => void wallet() }] : []),
     ...(session ? [{ id: 'copy', key: 'c', label: 'opy approval URL', onPress: () => { void renderer.copyText(session.url).then(() => setMessage('Approval URL copied.')).catch(() => setMessage('Select the full URL to copy it.')); } }, { id: 'open', key: 'o', label: 'pen approval page', onPress: () => openUrl(session.url) }] : []),
   ], state.status);
@@ -75,14 +79,20 @@ export function HyperliquidSetupPane({ focused, width }: PaneProps) {
     </Section> : null}
     {tab === 'Advanced' ? <Section title="Existing API wallet">
       <Text wrapText>Import an existing API wallet through the native command line. Supply the key through a protected file or standard input; never paste it into a pane or command argument.</Text>
+      <Text selectable wrapText fg={colors.textBright}>gloomberb hyperliquid import-key --network {network} --key-file /private/path/trading.key --address 0xYOUR_ACCOUNT_ADDRESS --yes --acknowledge-risk --eligible</Text>
       <Text wrapText fg={colors.textDim}>The wallet guide documents import, expiry, key storage, and revocation.</Text>
     </Section> : null}
     {tab === 'Settings' ? <Section title="Trading settings">
+      <QueryBar width={width - 4} filters={[
+        { id: 'sizeUnit', label: 'Default size', value: sizeUnit, options: [{ value: 'usd', label: 'USD' }, { value: 'coin', label: 'Coin' }, { value: 'percent', label: '% buying power' }], onChange: setSizeUnit },
+        { id: 'leverageBehavior', label: 'Leverage', value: leverageBehavior, options: [{ value: 'position', label: 'Existing position or default' }, { value: 'default', label: 'Default' }], onChange: setLeverageBehavior },
+      ]} />
       <FieldGrid width={width - 4} focused={focused} keyboard={false} activeId={active} onActivate={setActive} onDeactivate={() => setActive(null)} columns={1} fields={[
         { id: 'slippage', label: 'Slippage cap (bp)', value: Number(slippage), onValue: setSlippage },
         { id: 'maxOrder', label: 'Order guard USD', value: Number(maxOrder), onValue: setMaxOrder },
         { id: 'fatFinger', label: 'Price guard %', value: Number(fatFinger), onValue: setFatFinger },
         { id: 'port', label: 'Approval port', value: Number(port), onValue: value => setPort(Math.max(0, Math.min(65535, Math.round(value)))) },
+        { id: 'defaultLeverage', label: 'Default leverage', value: Number(defaultLeverage), suffix: 'x', onValue: value => setDefaultLeverage(Math.max(1, Math.min(100, Math.round(value)))) },
       ]} />
       <Box ref={ring.nodeRef('confirmations')}><Checkbox label="Confirm each order" checked={confirmations !== false && String(confirmations) !== 'false'} active={active === 'confirmations'} onChange={setConfirmations} /></Box>
       <KeyValueRow label="Gloom builder fee" value={configuredBuilder(network) ? '0.1%, explicit wallet approval required' : network === 'testnet' ? 'Off on testnet' : '0.1% configured; inactive until builder address is set'} />

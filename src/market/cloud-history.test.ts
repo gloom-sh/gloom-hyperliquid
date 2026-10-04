@@ -84,12 +84,25 @@ describe('cloud transport, entitlement and availability', () => {
     expect(free).toMatchObject({ state: 'pro-required', locked: true, data: null });
   });
   test('anonymous ranking preview retains allowed rows and reports the host auth gap honestly', async () => {
-    const client = new CloudPerpsClient({ request: async () => ({ status: 200, body: ranks({ access: 'preview', locked: true }) }), authenticationAvailable: false });
+    const client = new CloudPerpsClient({ request: async () => ({ status: 200, body: ranks({ access: 'preview', locked: true, fundingPositive: [ranked('BTC'), ranked('ETH'), ranked('SOL'), ranked('xyz:TSLA')] }) }), authenticationAvailable: false });
     const result = await client.rankings();
     expect(result.state).toBe('host-unavailable');
     expect(result.locked).toBe(true);
-    expect(result.data?.fundingPositive).toHaveLength(2);
+    expect(result.data?.fundingPositive).toHaveLength(3);
     expect(result.error).toContain('cannot share your Cloud login');
+  });
+  test('anonymous transport never claims a user entitlement or prompts an already signed-in user', async () => {
+    for (const status of [401, 402, 403]) {
+      const result = await new CloudPerpsClient({ request: async () => ({ status, body: {} }), authenticationAvailable: false }).rankings();
+      expect(result.state).toBe('host-unavailable');
+    }
+    const unexpected = await new CloudPerpsClient({ request: async () => ({ status: 200, body: ranks() }), authenticationAvailable: false }).rankings();
+    expect(unexpected).toMatchObject({ state: 'error', data: null });
+  });
+  test('transport failures do not reflect response bodies or internal credential errors', async () => {
+    const result = await new CloudPerpsClient({ request: async () => { throw new Error('Private transport failure detail'); } }).history('BTC');
+    expect(result.state).toBe('unavailable');
+    expect(result.error).not.toContain('Private transport failure detail');
   });
   test('history without host authentication and testnet make no cloud request', async () => {
     let calls = 0;

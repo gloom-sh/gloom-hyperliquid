@@ -1,4 +1,4 @@
-import type { AssetClass, BookLevel, Candle, Dex, FundingPoint, Market, OrderBook, PredictedFunding, RawContext, RawMeta, Trade } from './types.ts';
+import type { AssetClass, BookLevel, Candle, Dex, Market, OrderBook, PredictedFunding, RawContext, RawMeta, Trade } from './types.ts';
 export function numberOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
   const n = Number(value); return Number.isFinite(n) ? n : null;
@@ -49,7 +49,7 @@ export function normalizeMarkets(meta: RawMeta, contexts: RawContext[], dex: Dex
       growthMode: asset.growthMode ?? null, deployerFeeScale: numberOrNull(asset.deployerFeeScale),
       mark:null, oracle:null, mid:null, premium:null, fundingPremium:null, change24h:null, prevDayPrice:null,
       fundingHourly:null, funding8h:null, fundingApr:null, oiCoin:null, oiUsd:null, volume24h:null, oiVolume:null,
-      oiChange1h:null, oiChange24h:null, oiChange1hUsd:null, oiChange24hUsd:null, asOf:now, priceTime:now, tickDirection:0 };
+      asOf:now, priceTime:now, tickDirection:0 };
     return [applyContext(market, contexts[index] ?? {}, now)];
   });
 }
@@ -77,10 +77,6 @@ export function normalizeTrade(raw: any): Trade | null {
   const price = numberOrNull(raw.px), size = numberOrNull(raw.sz), time = numberOrNull(raw.time);
   if (price === null || size === null || time === null || !['B','A'].includes(raw.side)) return null;
   return {id:`${raw.coin}:${time}:${raw.tid ?? raw.hash}`,coin:raw.coin,side:raw.side === 'B' ? 'buy' : 'sell',price,size,time};
-}
-export function normalizeFunding(raw: any): FundingPoint | null {
-  const time = numberOrNull(raw.time), rate = numberOrNull(raw.fundingRate);
-  return time === null || rate === null ? null : {time,rate,premium:numberOrNull(raw.premium)};
 }
 export function normalizePredicted(raw: unknown): PredictedFunding[] {
   if (!Array.isArray(raw)) return [];

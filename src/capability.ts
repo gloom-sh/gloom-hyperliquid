@@ -40,7 +40,7 @@ export function registerNativeCapabilities(ctx: GloomPluginContext): () => void 
   const reads = new Set<TradingOperation>(['status', 'account', 'preview', 'connectionStatus', 'history', 'region']);
   const local = new Set<TradingOperation>(['watch', 'connect', 'import', 'disconnect', 'acknowledge', 'wallet']);
   // Key import is native CLI only: renderer and generic capability inputs may be recorded.
-  const operationNames: TradingOperation[] = ['status', 'watch', 'connect', 'disconnect', 'account', 'preview', 'submit', 'cancel', 'modify', 'leverage', 'margin', 'wallet', 'connectionStatus', 'acknowledge', 'region', 'close', 'reverse', 'closeAll', 'twapCancel', 'history'];
+  const operationNames: TradingOperation[] = ['status', 'watch', 'connect', 'disconnect', 'account', 'preview', 'submit', 'cancel', 'modify', 'leverage', 'margin', 'wallet', 'connectionStatus', 'acknowledge', 'region', 'close', 'reverse', 'closeAll', 'twapCancel', 'twapResume', 'history'];
   const operations: Record<string, CapabilityOperation> = {};
   for (const name of operationNames) operations[name] = {
     kind: reads.has(name) ? 'query' : 'action', rendererSafe: true,
@@ -70,6 +70,16 @@ export function registerNativeCapabilities(ctx: GloomPluginContext): () => void 
     if (!entry) { entry = { store: new AccountStore(network, getLocalMarketService(network)), refs: 0 }; watches.set(key, entry); }
     const snapshot = () => ({ status: { network, address, mode: 'watch', riskAcknowledged: false, eligibleAcknowledged: false }, account: entry!.store.getSnapshot() ?? null });
     return { entry, address, network, snapshot };
+  };
+  operations.watchSnapshot = {
+    kind: 'query', rendererSafe: true,
+    async handler(input) {
+      const { entry, address, network, snapshot } = watch(input as Record<string, unknown>);
+      entry.refs++;
+      if (entry.refs === 1) entry.release = getLocalMarketService(network).subscribe(() => {});
+      try { await entry.store.setAddress(address); return snapshot(); }
+      finally { if (--entry.refs === 0) { entry.release?.(); entry.release = undefined; entry.store.stop(); } }
+    },
   };
   operations.watchStream = {
     kind: 'stream', rendererSafe: true,

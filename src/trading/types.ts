@@ -20,7 +20,7 @@ export interface TradingMarket {
   marginTiers?: { lowerBound: number; maxLeverage: number }[];
 }
 export interface TicketRequest {
-  market: TradingMarket; side: 'buy' | 'sell'; kind: 'market' | 'limit' | 'stop-market' | 'stop-limit' | 'take-profit-market' | 'take-profit-limit' | 'twap' | 'scale';
+  accountAddress?:Address; market: TradingMarket; side: 'buy' | 'sell'; kind: 'market' | 'limit' | 'stop-market' | 'stop-limit' | 'take-profit-market' | 'take-profit-limit' | 'twap' | 'scale';
   size: number | string; sizeUnit: 'coin' | 'usd' | 'percent'; leverage: number; marginMode: 'cross' | 'isolated';
   limitPrice?: number; triggerPrice?: number; tif?: 'Gtc' | 'Alo' | 'Ioc'; reduceOnly?: boolean;
   takeProfit?: number; stopLoss?: number; positionTpsl?: boolean;
@@ -76,4 +76,4 @@ export interface SharedTransport {
   info: { request<T>(body: Record<string, unknown>, options?: { signal?: AbortSignal; weight?: number }): Promise<T> };
   ws: { getStatus?():string; subscribe(subscription: Record<string, unknown>, handler: (data: any) => void, onReconnect?: () => void): () => void };
 }
-export type TradingOperation = 'status' | 'watch' | 'connect' | 'import' | 'disconnect' | 'account' | 'preview' | 'submit' | 'cancel' | 'modify' | 'leverage' | 'margin' | 'wallet' | 'connectionStatus' | 'acknowledge' | 'region' | 'close' | 'reverse' | 'closeAll' | 'twapCancel' | 'history';
+export type TradingOperation = 'status' | 'watch' | 'connect' | 'import' | 'disconnect' | 'account' | 'preview' | 'submit' | 'cancel' | 'modify' | 'leverage' | 'margin' | 'wallet' | 'connectionStatus' | 'acknowledge' | 'region' | 'close' | 'reverse' | 'closeAll' | 'twapCancel' | 'twapResume' | 'history';

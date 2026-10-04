@@ -149,8 +149,13 @@ addresses disable both the fee and its approval. Testnet always skips builder
 fees. The approval page discloses
 the fee before the main wallet signs a maximum **0.1%** approval, the ticket says
 **including Gloom's 0.1% builder fee**, and the wallet page offers revocation.
-Native TWAP does not accept a builder field; its availability must reflect this
-exchange limitation while a builder fee is active.
+Hyperliquid's native TWAP action does not accept builder fees. Mainnet TWAP
+therefore runs locally as capped IOC slices, each with the same builder fee.
+Keep Gloom running: shutdown or restart pauses remaining slices, and resuming
+requires an explicit action. Unknown execution outcomes pause the schedule;
+inspect fills before resuming. Cancel stops future slices but cannot undo one
+already submitted. Testnet uses the venue's native TWAP. The ticket discloses
+this difference before submission.
 
 Order confirmations are configurable. Size and distance-from-mark guards require
 explicit confirmation. Stable client order IDs, a persisted monotonic nonce and

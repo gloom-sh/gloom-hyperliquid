@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Box } from 'gloomberb/ui';
 import { Button, ChartTableHeader, DataTableView, EmptyState, PaneStatusBody, QueryBar, pricePointsToResolvedSeries, usePaneTabs, useQueryBarSearch, type DataTableColumn } from 'gloomberb/components';
-import { useAsyncResource, useAutoRefresh, usePluginAppActions, usePluginPaneState } from 'gloomberb/react';
+import { useAsyncResource, useAutoRefresh, usePaneSettingValue, usePluginAppActions, usePluginPaneState } from 'gloomberb/react';
 import type { PaneProps } from 'gloomberb/types/plugin';
 import { colors } from 'gloomberb/theme';
-import type { CloudHistory, CloudRankedMarket, CloudRankings, CloudResult, PredictedFunding } from '../market';
+import type { CloudRankedMarket, CloudResult, PredictedFunding } from '../market';
 import { getCloudPerpsClient } from '../market/cloud-history';
-import { compact, dateTime, number, percent, price, tone } from './format';
+import { compact, dateTime, percent, price, tone } from './format';
 import { useBoard, useLiveFooter, useNetwork } from './hooks';
 
 const RANGE_OPTIONS = [1, 7, 30, 90, 365].map(days => ({ value: String(days), label: days === 1 ? '1D' : days === 7 ? '1W' : days === 30 ? '1M' : days === 90 ? '3M' : '1Y' }));
@@ -26,7 +26,7 @@ export function FundingHistory({ coin, width, height, focused, metric = 'funding
   const resource = useAsyncResource(loader);
   useAutoRefresh(resource.updatedAt, resource.reload, { intervalMs: 60_000 });
   const data = resource.data?.data;
-  const paid = metric === 'funding' && fundingKind === 'paid';
+  const paid = metric === 'funding' && fundingKind === 'historical';
   const rows = useMemo(() => {
     if (!data) return [];
     const points = paid ? data.funding.map(p => ({ time: p.time, primary: p.rate / p.intervalHours, secondary: p.premium, mark: null as number | null, oracle: null as number | null, observedAt: p.observedAt })) : data.points.map(p => ({
@@ -37,19 +37,20 @@ export function FundingHistory({ coin, width, height, focused, metric = 'funding
   }, [data, paid, metric]);
   const [selected, setSelected] = useState<number | null>(null);
   const columns: DataTableColumn[] = [
-    { id: 'time', label: paid ? 'Paid UTC' : 'Time UTC', width: 21, align: 'left' },
-    { id: 'primary', label: metric === 'oi' ? 'OI USD' : metric === 'premium' ? 'Mark / oracle %' : paid ? 'Paid /1h %' : 'Current /1h %', width: 18, align: 'right' },
+    { id: 'time', label: paid ? 'Funding UTC' : 'Time UTC', width: 21, align: 'left' },
+    { id: 'primary', label: metric === 'oi' ? 'OI USD' : metric === 'premium' ? 'Mark / oracle %' : paid ? 'Historical /1h %' : 'Observed /1h %', width: 18, align: 'right' },
     ...(metric === 'oi' ? [{ id: 'secondary', label: 'OI coin', width: 17, align: 'right' as const }, { id: 'change', label: 'OI USD change %', width: 18, align: 'right' as const }] : metric === 'premium' ? [{ id: 'mark', label: 'Mark', width: 15, align: 'right' as const }, { id: 'oracle', label: 'Oracle', width: 15, align: 'right' as const }] : [{ id: 'secondary', label: paid ? 'Funding premium %' : 'Mark / oracle %', width: 20, align: 'right' as const }]),
     { id: 'observedAt', label: 'Observed UTC', width: 21, align: 'left' },
   ];
-  const series = useMemo(() => [pricePointsToResolvedSeries([...rows].reverse().flatMap(p => p.primary == null ? [] : [{ date: new Date(p.time), close: p.primary * (metric === 'oi' ? 1 : 100) }]), { id: 'history', label: metric === 'oi' ? 'OI USD' : metric === 'premium' ? 'Mark / oracle premium' : paid ? 'Paid funding /1h' : 'Current funding /1h', unit: metric === 'oi' ? 'USD' : '%', unitGroup: metric === 'oi' ? 'currency' : 'percentage', color: colors.borderFocused, style: 'line', axis: 'right' })], [rows, metric, paid]);
+  const series = useMemo(() => [pricePointsToResolvedSeries([...rows].reverse().flatMap(p => p.primary == null ? [] : [{ date: new Date(p.time), close: p.primary * (metric === 'oi' ? 1 : 100) }]), { id: 'history', label: metric === 'oi' ? 'OI USD' : metric === 'premium' ? 'Mark / oracle premium' : paid ? 'Historical funding /1h' : 'Observed funding /1h', unit: metric === 'oi' ? 'USD' : '%', unitGroup: metric === 'oi' ? 'currency' : 'percentage', color: colors.borderFocused, style: 'line', axis: 'right' })], [rows, metric, paid]);
   useLiveFooter('hyperliquid-history', { network, status: resource.loading ? 'Loading history' : resource.data?.state === 'ready' ? 'Historical' : resource.data?.state ?? 'unavailable', asOf: resource.data?.asOf, error: resource.error ?? (resource.data?.state === 'partial' ? 'Partial history' : null) });
   const query = <QueryBar width={width} filters={[
     { id: 'days', label: 'Range', value: days, options: RANGE_OPTIONS, onChange: setDays },
     { id: 'resolution', label: 'Resolution', value: resolution, options: ['auto', 'minute', 'hour', 'day'].map(value => ({ value, label: value === 'auto' ? 'Auto' : value })), onChange: setResolution },
-    ...(metric === 'funding' ? [{ id: 'fundingKind', label: 'Funding', value: fundingKind, options: [{ value: 'current', label: 'Current rate' }, { value: 'paid', label: 'Paid funding' }], onChange: setFundingKind }] : []),
+    ...(metric === 'funding' ? [{ id: 'fundingKind', label: 'Funding', value: fundingKind, options: [{ value: 'current', label: 'Observed rate' }, { value: 'historical', label: 'Historical funding' }], onChange: setFundingKind }] : []),
   ]} />;
-  if (!data || resource.data?.locked || !rows.length) return <Box flexGrow={1} flexDirection="column">{query}<CloudStateBody result={resource.data} loading={resource.loading} retry={resource.reload} /></Box>;
+  if (!data || resource.data?.locked || !rows.length && resource.data?.state === 'collecting') return <Box flexGrow={1} flexDirection="column">{query}<CloudStateBody result={resource.data} loading={resource.loading} retry={resource.reload} /></Box>;
+  if (!rows.length) return <Box flexGrow={1} flexDirection="column">{query}<EmptyState title="No history in this range." hint="Choose another range or wait for new observations." /></Box>;
   return <DataTableView focused={focused} rootWidth={width} rootHeight={height} columns={columns} items={rows} getItemKey={r => String(r.time)} sortColumnId={null} sortDirection="desc"
     selection={{ kind: 'index', selectedIndex: selected, onChange: setSelected }}
     rootBefore={<ChartTableHeader width={width} height={height} tableRows={rows.length} tableColumns={columns} query={query}
@@ -75,7 +76,8 @@ const RANK_COLUMNS: Record<string, DataTableColumn[]> = {
 };
 export function HyperliquidAnalyticsPane({ focused, width, height }: PaneProps) {
   const board = useBoard(); const app = usePluginAppActions();
-  const [tab, setTab] = usePluginPaneState('analyticsTab', 'Funding');
+  const [defaultTab] = usePaneSettingValue('defaultTab', 'Funding');
+  const [tab, setTab] = usePluginPaneState('analyticsTab', ['Funding', 'Open interest', 'Premium', 'Predicted'].find(value => value.toLowerCase() === defaultTab.toLowerCase()) ?? 'Funding');
   const [category, setCategory] = usePluginPaneState('analyticsClass', 'All');
   const [query, setQuery] = usePluginPaneState('analyticsQuery', '');
   const [fundingSide, setFundingSide] = usePluginPaneState('fundingSide', 'positive');

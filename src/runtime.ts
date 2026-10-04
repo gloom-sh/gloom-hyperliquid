@@ -50,7 +50,7 @@ function createRemoteService(network: Network): MarketServiceView {
       const key = JSON.stringify([coin, options]);
       let session = sessions.get(key);
       if (!session) {
-        session = remoteStore<MarketSnapshot>(network, 'market', { market: null, book: null, candles: [], trades: [], funding: [], oiHistory: [], annotation: null, status: 'connecting', asOf: null, error: null }, { coin, options });
+        session = remoteStore<MarketSnapshot>(network, 'market', { market: null, book: null, candles: [], trades: [], annotation: null, status: 'connecting', asOf: null, error: null }, { coin, options });
         sessions.set(key, session);
       }
       return session;

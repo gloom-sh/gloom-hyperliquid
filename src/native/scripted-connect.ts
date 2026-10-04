@@ -7,5 +7,5 @@ export async function connectWithMainWallet(options:TradingServiceOptions, priva
   try{
     await service.invoke('acknowledge',acknowledgements);
     return await service.connectMainWallet(privateKey);
-  }finally{service.dispose();}
+  }finally{await service.dispose();}
 }

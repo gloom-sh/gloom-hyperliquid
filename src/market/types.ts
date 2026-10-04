@@ -3,7 +3,6 @@ export type LiveStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'stal
 export type AssetClass = 'Stocks' | 'Indices' | 'Energy' | 'Metals' | 'FX' | 'Crypto' | 'Other';
 export const CANDLE_INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M'] as const;
 export type CandleInterval = typeof CANDLE_INTERVALS[number];
-export interface LocalStore { get<T>(key: string): T | undefined; set<T>(key: string, value: T): void }
 export interface MarginTier { lowerBound: number; maxLeverage: number }
 export interface Dex {
   name: string; fullName: string; index: number; deployer: string | null; oracleUpdater: string | null;
@@ -22,7 +21,6 @@ export interface Market {
   fundingPremium: number | null; change24h: number | null; prevDayPrice: number | null;
   fundingHourly: number | null; funding8h: number | null; fundingApr: number | null;
   oiCoin: number | null; oiUsd: number | null; volume24h: number | null; oiVolume: number | null;
-  oiChange1h: number | null; oiChange24h: number | null; oiChange1hUsd: number | null; oiChange24hUsd: number | null;
   asOf: number; priceTime: number; tickDirection: -1 | 0 | 1;
 }
 export interface PredictedFunding { coin: string; venue: string; rate: number; intervalHours: number; per8h: number; apr: number; nextFundingTime: number }
@@ -31,10 +29,8 @@ export interface Candle { time: number; endTime: number; open: number; high: num
 export interface BookLevel { price: number; size: number; orders: number; totalSize: number; totalUsd: number }
 export interface OrderBook { coin: string; bids: BookLevel[]; asks: BookLevel[]; spread: number | null; spreadBps: number | null; mid: number | null; time: number; nSigFigs?: 2 | 3 | 4 | 5 | null; mantissa?: 1 | 2 | 5 | null }
 export interface Trade { id: string; coin: string; side: 'buy' | 'sell'; price: number; size: number; time: number }
-export interface FundingPoint { time: number; rate: number; premium: number | null }
-export interface OiPoint { time: number; coin: number; usd: number }
 export interface PerpAnnotation { category?: string; description?: string; displayName?: string; keywords?: string[] }
-export interface MarketSnapshot { market: Market | null; book: OrderBook | null; candles: Candle[]; trades: Trade[]; funding: FundingPoint[]; oiHistory: OiPoint[]; annotation: PerpAnnotation | null; status: LiveStatus; asOf: number | null; error: string | null }
+export interface MarketSnapshot { market: Market | null; book: OrderBook | null; candles: Candle[]; trades: Trade[]; annotation: PerpAnnotation | null; status: LiveStatus; asOf: number | null; error: string | null }
 export interface MarketOptions { interval?: CandleInterval; nSigFigs?: 2 | 3 | 4 | 5 | null; mantissa?: 1 | 2 | 5 }
 export interface MarketSession { getSnapshot(): MarketSnapshot; subscribe(listener: () => void): () => void; refresh(): Promise<void> }
 export interface RawAsset { name: string; szDecimals: number; maxLeverage: number; marginTableId?: number; isDelisted?: boolean; onlyIsolated?: boolean; marginMode?: string; growthMode?: string; deployerFeeScale?: string }

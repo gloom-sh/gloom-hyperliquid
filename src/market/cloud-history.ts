@@ -2,7 +2,7 @@ import type { AssetClass, Network } from './types.ts';
 import { numberOrNull } from './normalize.ts';
 
 /** Public response contract pinned to cloud PR 626, 057f23788b6bd85a3843ab407b47d43f23e72545.
- * Authentication is supplied by the native host. This module never reads session tokens.
+ * An authenticated connection must be supplied by a supported host API. This module never reads session tokens.
  * Historical analytics have no direct-exchange or locally reconstructed fallback.
  */
 export type CloudState = 'ready' | 'partial' | 'collecting' | 'sign-in' | 'pro-required' | 'host-unavailable' | 'unavailable' | 'error' | 'testnet';
@@ -103,9 +103,9 @@ export function normalizeCloudRankings(raw: unknown): CloudRankings {
       observedAt, sourceAsOf: timestamp(p.sourceAsOf), sourceUrl: text(p.sourceUrl), qualityFlags: rows(p.qualityFlags).filter((v):v is string=>typeof v==='string'),
       confidence: p.confidence === 'high' || p.confidence === 'medium' ? p.confidence : 'low' as const, stale: p.stale === true}];
   });
-  return Object.fromEntries(RANKING_SECTIONS.map(key=>[key,normalize(data[key])])) as CloudRankings;
+  return Object.fromEntries(RANKING_SECTIONS.map(key=>[key,normalize(data[key]).slice(0,data.access==='preview'?3:undefined)])) as CloudRankings;
 }
-/** Requests go only through the injected, authenticated host connection. */
+/** Requests go through an injected transport; historical access is checked independently. */
 export class CloudPerpsClient implements CloudPerpsClientLike {
   constructor(private options: CloudClientOptions = {}) {}
   async history(coin: string, query: CloudHistoryQuery = {}): Promise<CloudResult<CloudHistory>> {
@@ -133,6 +133,7 @@ export class CloudPerpsClient implements CloudPerpsClientLike {
       const response=await this.options.request(path,{signal});
       if(signal?.aborted)throw signal.reason??new Error('Request cancelled');
       const raw=object(response.body),signedIn=this.options.signedIn?.()??false;
+      if([401,402,403].includes(response.status)&&this.options.authenticationAvailable===false)return this.failure('host-unavailable','This version of Gloom cannot share your Cloud login with plugins.');
       if(response.status===401)return this.failure('sign-in','Sign in to Gloom for Pro historical analytics.');
       if(response.status===402||response.status===403)return this.failure(signedIn?'pro-required':'sign-in',signedIn?'Historical analytics require Gloom Pro.':'Sign in to Gloom for Pro historical analytics.');
       if(response.status===404||response.status===503||raw.status==='unavailable')return this.failure('unavailable','Cloud perpetual analytics are not available on this server yet.');
@@ -140,6 +141,7 @@ export class CloudPerpsClient implements CloudPerpsClientLike {
       if(!['ok','partial','collecting'].includes(String(raw.status)))return this.failure('unavailable','Cloud perpetual analytics returned an unsupported response.');
       const access=raw.access==='pro'?'pro':raw.access==='preview'?'preview':null;
       if(access===null)return this.failure('error','Cloud analytics did not report an entitlement.');
+      if(access==='pro'&&this.options.authenticationAvailable===false)return this.failure('error','The anonymous cloud connection returned an unexpected entitlement.');
       const locked=access!=='pro'||raw.locked===true;
       const hostUnavailable=locked&&this.options.authenticationAvailable===false;
       const state:CloudState=hostUnavailable?'host-unavailable':locked?signedIn?'pro-required':'sign-in':raw.status==='collecting'?'collecting':raw.status==='partial'?'partial':'ready';
@@ -156,7 +158,7 @@ const anonymousRequest: CloudRequest = async (path, options) => {
   const { httpFetch } = await import('gloomberb/utils');
   const timeout = AbortSignal.timeout(10_000);
   const signal = options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-  const response = await httpFetch(`https://api.gloom.sh${path}`, { signal, credentials: 'omit' });
+  const response = await httpFetch(`https://api.gloom.sh${path}`, { method: 'GET', signal, credentials: 'omit', redirect: 'error' });
   return { status: response.status, body: await response.json().catch(() => null) };
 };
 const defaultConnection: Omit<CloudClientOptions, 'network'> = { request: anonymousRequest, authenticationAvailable: false };

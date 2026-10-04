@@ -8,7 +8,7 @@ import { configuredBuilder } from './builder';
 import { perpFeeRates } from './fees';
 import { roundPrice, roundSize, isolatedLiquidation, maintenanceTier, estimateFill } from './math';
 import { previewTicket, clientOrderId } from './orders';
-import { normalizeBalances, availableForMarket } from './account';
+import { AccountStore, normalizeBalances, availableForMarket } from './account';
 import { checkRegion } from './regions';
 import { walletAction, userSignedTypedData } from './wallet-actions';
 import { DEFAULT_TRADING_SETTINGS, type TradingMarket, type TicketRequest, type AccountSnapshot } from './types';
@@ -92,6 +92,13 @@ test('country gate fails closed for lookup failures and restricted locations',as
   for(const country of ['US','CA','IR'])expect((await checkRegion((async()=>new Response(`loc=${country}\n`)) as any)).allowed).toBe(false);
   expect((await checkRegion((async()=>new Response('loc=DE\n')) as any)).allowed).toBe(true);
   expect((await checkRegion((async()=>{throw new Error('offline');}) as any)).allowed).toBe(false);
+});
+
+test('concurrent views share account initialization without restarting subscriptions',async()=>{
+  let release!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve;});let stateRequests=0,subscriptions=0;
+  const state={marginSummary:{accountValue:'100',totalMarginUsed:'0'},crossMarginSummary:{accountValue:'100',totalMarginUsed:'0'},crossMaintenanceMarginUsed:'0',withdrawable:'100',assetPositions:[],time:1};
+  const store=new AccountStore('testnet',{info:{request:async(body)=>{await barrier;if(body.type==='clearinghouseState'){stateRequests++;return state as any;}if(body.type==='spotClearinghouseState')return {balances:[]} as any;if(body.type==='userAbstraction')return 'default' as any;return [] as any;}},ws:{subscribe:()=>{subscriptions++;return()=>{};}}});
+  try{const address='0x1111111111111111111111111111111111111111';const first=store.setAddress(address),before=subscriptions,second=store.setAddress(address);expect(subscriptions).toBe(before);release();const snapshots=await Promise.all([first,second]);expect(stateRequests).toBe(1);expect(snapshots[0].accountValue).toBe(100);expect(snapshots[1].error).toBeUndefined();}finally{store.stop();}
 });
 
 test('L1 submitted order signature matches independently signed EIP712 payload byte for byte',async()=>{

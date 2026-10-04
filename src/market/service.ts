@@ -1,7 +1,7 @@
 import { applyContext, normalizeBook, normalizeCandle, normalizeMarkets, normalizePredicted, normalizeTrade, numberOrNull, resolveMarket } from './normalize.ts';
 import { InfoClient, SharedWebSocket } from './transport.ts';
-import type { AssetClass, BoardSnapshot, Candle, CandleInterval, Dex, LocalStore, Market, MarketOptions, MarketSession, MarketSnapshot, Network, OrderBook, PerpAnnotation, RawContext, RawDex, RawMeta, Trade } from './types.ts';
-export interface MarketServiceOptions { network:Network; storage?:LocalStore; fetch?:typeof fetch; info?:InfoClient; ws?:SharedWebSocket; pollIntervalMs?:number; batchMs?:number }
+import type { AssetClass, BoardSnapshot, Candle, CandleInterval, Dex, Market, MarketOptions, MarketSession, MarketSnapshot, Network, OrderBook, PerpAnnotation, RawContext, RawDex, RawMeta, Trade } from './types.ts';
+export interface MarketServiceOptions { network:Network; fetch?:typeof fetch; info?:InfoClient; ws?:SharedWebSocket; pollIntervalMs?:number; batchMs?:number }
 type BookConfig={nSigFigs?:2|3|4|5|null;mantissa?:1|2|5};
 const message=(e:unknown)=>e instanceof Error?e.message:String(e);
 const intervalMs=(interval:CandleInterval)=>{const count=parseInt(interval);return count*({m:60_000,h:3_600_000,d:86_400_000,w:604_800_000,M:2_678_400_000}[interval.at(-1)!]??60_000)};
@@ -32,7 +32,7 @@ export class MarketDataService {
   private readonly batchMs:number;
   constructor(options:MarketServiceOptions) {
     this.network=options.network;this.info=options.info??new InfoClient(options.network,options.fetch);
-    this.ws=options.ws??new SharedWebSocket(options.network);;
+    this.ws=options.ws??new SharedWebSocket(options.network);
     this.pollInterval=options.pollIntervalMs??30_000;this.batchMs=options.batchMs??200;
   }
   getSnapshot=():BoardSnapshot=>this.snapshot;
@@ -198,11 +198,11 @@ class BookResource {
   private emit():void{for(const listener of this.listeners)listener()}
 }
 class DetailSession implements MarketSession {
-  private snapshot:MarketSnapshot={market:null,book:null,candles:[],trades:[],funding:[],oiHistory:[],annotation:null,status:'idle',asOf:null,error:null};
+  private snapshot:MarketSnapshot={market:null,book:null,candles:[],trades:[],annotation:null,status:'idle',asOf:null,error:null};
   private listeners=new Set<()=>void>();
   private releases:(()=>void)[]=[];
   private timer:ReturnType<typeof setTimeout>|null=null;
-    private refreshing:Promise<void>|null=null;
+  private refreshing:Promise<void>|null=null;
   private candleVersions=new Map<number,number>();
   constructor(private service:MarketDataService,private coin:string,private interval:CandleInterval,private batchMs:number){}
   getSnapshot=():MarketSnapshot=>this.snapshot;
@@ -210,7 +210,7 @@ class DetailSession implements MarketSession {
   async refresh():Promise<void>{if(this.refreshing)return this.refreshing;this.refreshing=this.fetch().finally(()=>{this.refreshing=null});return this.refreshing}
   dispose():void{this.listeners.clear();this.stop()}
   private start():void{
-    const update=()=>{const board=this.service.getSnapshot();this.patch({market:board.markets.find(m=>m.coin===this.coin)??null,status:board.status,asOf:board.asOf,oiHistory:[]})};
+    const update=()=>{const board=this.service.getSnapshot();this.patch({market:board.markets.find(m=>m.coin===this.coin)??null,status:board.status,asOf:board.asOf})};
     this.releases.push(this.service.subscribe(update));update();
     const book=this.service.book(this.coin);this.releases.push(book.subscribe(()=>this.patch({book:book.getSnapshot(),...(book.error?{error:book.error}:{})})));
     this.releases.push(this.service.ws.subscribe({type:'candle',coin:this.coin,interval:this.interval},data=>{
@@ -232,7 +232,7 @@ class DetailSession implements MarketSession {
   }
   private async fetch():Promise<void>{
     if(!this.service.getSnapshot().markets.length)await this.service.refresh();
-    const board=this.service.getSnapshot();this.patch({market:board.markets.find(m=>m.coin===this.coin)??null,status:board.status,asOf:board.asOf,oiHistory:[]});
+    const board=this.service.getSnapshot();this.patch({market:board.markets.find(m=>m.coin===this.coin)??null,status:board.status,asOf:board.asOf});
     const started=Date.now();
     const results=await Promise.allSettled([
       this.service.info.request<any[]>({type:'candleSnapshot',req:{coin:this.coin,interval:this.interval,startTime:started-600*intervalMs(this.interval),endTime:started}}),

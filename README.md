@@ -55,7 +55,8 @@ The desktop browser entry delegates account operations to the native capability;
 market and account subscriptions share one WebSocket per network.
 
 Development verification uses read-only mainnet and throwaway testnet keys only.
-See [implementation boundaries](docs/implementation.md) for the verification plan.
+See the [scope and verification ledger](docs/verification.md) for tested paths,
+live evidence and remaining integration gaps.
 
 ## License
 

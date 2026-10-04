@@ -36,7 +36,7 @@ function setup(count=2){
 describe('market service data integration',()=>{
   test('headless board/detail snapshots need no socket and collateral resolves token index, not array position',async()=>{
     const {service,sockets}=setup();await service.refresh();const board=service.getSnapshot();expect(board.markets).toHaveLength(2);expect(board.markets[1]?.collateral).toBe('USDH');expect(board.markets[1]?.assetId).toBe(110000);
-    const detail=service.getMarket('xyz:TSLA');await detail.refresh();const state=detail.getSnapshot();expect(state.market?.coin).toBe('xyz:TSLA');expect(state.candles[0]?.close).toBe(99);expect(state.funding).toEqual([]);expect(state.book?.spread).toBe(2);expect(sockets).toHaveLength(0);service.dispose();
+    const detail=service.getMarket('xyz:TSLA');await detail.refresh();const state=detail.getSnapshot();expect(state.market?.coin).toBe('xyz:TSLA');expect(state.candles[0]?.close).toBe(99);expect(state.book?.spread).toBe(2);expect(sockets).toHaveLength(0);service.dispose();
   });
   test('true mark ticks update OI USD while allMids changes only mid',async()=>{
     const{service,sockets}=setup();const stop=service.subscribe(()=>{});sockets[0]!.open();await service.refresh();

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, unlink, chmod, lstat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink, chmod, lstat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Address, Network, TradingStatus } from '../trading/types';
@@ -40,6 +40,21 @@ export class KeyStore {
   }
   async disconnect() {const profile=await this.readProfile();if(profile.storage==='keychain'){try{await Bun.secrets.delete({service:this.service,name:'api-wallet'});if(await Bun.secrets.get({service:this.service,name:'api-wallet'}))throw new Error();}catch{throw new Error('Could not remove the API wallet from the OS keychain. Disconnect was not completed.');}}await unlink(join(this.directory,'api-wallet.key')).catch(error=>{if((error as NodeJS.ErrnoException).code!=='ENOENT')throw new Error('Could not remove the API wallet file. Disconnect was not completed.');});await this.writeProfile({version:1,mode:'disconnected'});}
   async readJson<T>(name:string,fallback:T):Promise<T> {try{return JSON.parse(await readFile(join(this.directory,name),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return fallback;throw new Error('Could not read local trading state.');}}
+  async acquireTwapLease(id:string):Promise<()=>Promise<void>>{
+    await this.ensure();const name=createHash('sha256').update(id).digest('hex').slice(0,32),lock=join(this.directory,`twap-${name}.lock`);
+    try{await mkdir(lock,{mode:0o700});}catch(error){
+      if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;
+      const recovery=`${lock}.recovery`;try{await mkdir(recovery,{mode:0o700});}catch{throw new Error('Another process is inspecting the local TWAP lock.');}
+      try{
+        let owner:{pid:number};try{owner=JSON.parse(await readFile(join(lock,'owner.json'),'utf8'));}catch{throw new Error('Local TWAP lock is incomplete. Inspect the running process before retrying.');}
+        if(!Number.isSafeInteger(owner.pid)||owner.pid<=0)throw new Error('Local TWAP lock owner is invalid.');
+        try{process.kill(owner.pid,0);throw new Error('This local TWAP is running in another Gloom process.');}catch(check){if((check as NodeJS.ErrnoException).code!=='ESRCH')throw check;}
+        await rm(lock,{recursive:true});await mkdir(lock,{mode:0o700});
+      }finally{await rm(recovery,{recursive:true});}
+    }
+    const token=crypto.randomUUID();await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid,token}),{mode:0o600,flag:'wx'});
+    return async()=>{const owner=JSON.parse(await readFile(join(lock,'owner.json'),'utf8'));if(owner.token!==token)throw new Error('Local TWAP lock changed owner.');await rm(lock,{recursive:true});};
+  }
   async tradingLock<T>(work:()=>Promise<T>):Promise<T>{await this.ensure();const lock=join(this.directory,'trading.lock');try{await mkdir(lock,{mode:0o700});}catch{throw new Error('Another trading request is in progress. Wait for its outcome.');}try{return await work();}finally{await import('node:fs/promises').then(fs=>fs.rmdir(lock));}}
   /** Persist before signing; file lock serializes multiple app processes sharing one profile. */
   async nextNonce():Promise<number> {

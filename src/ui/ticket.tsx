@@ -56,6 +56,7 @@ export function OrderTicket({ market, book, width, focused, limitPrice, onClearP
   const dialog = useDialog();
   const [defaultUnit] = usePluginConfigState<TicketRequest['sizeUnit']>('sizeUnit', 'usd');
   const [defaultLeverage] = usePluginConfigState('defaultLeverage', 3);
+  const [leverageBehavior] = usePluginConfigState('leverageBehavior', 'position');
   const [confirmations] = usePluginConfigState<boolean | string>('confirmations', true);
   const [draft, setDraft] = usePluginPaneState<Draft>(`ticket:${market.coin}`, { side: 'buy', kind: 'market', size: 0, sizeUnit: defaultUnit, leverage: Math.min(defaultLeverage, market.maxLeverage), marginMode: market.onlyIsolated ? 'isolated' : 'cross', limitPrice: market.mark ?? 0, triggerPrice: 0, tif: 'Gtc', reduceOnly: false, takeProfit: 0, stopLoss: 0, twapMinutes: 30, scaleStart: 0, scaleEnd: 0, scaleCount: 5 });
   const [active, setActive] = useState<string | null>(null);
@@ -68,7 +69,17 @@ export function OrderTicket({ market, book, width, focused, limitPrice, onClearP
   const [error, setError] = useState<string | null>(null);
   const clientId = useRef(crypto.randomUUID());
   const submitting = useRef(false);
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => { setDraft(old => ({ ...old, [key]: value })); setError(null); setMessage(null); clientId.current = crypto.randomUUID(); };
+  const edited = useRef(false);
+  const leverageInitialized = useRef(false);
+  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => { edited.current = true; setDraft(old => ({ ...old, [key]: value })); setError(null); setMessage(null); clientId.current = crypto.randomUUID(); };
+  useEffect(() => {
+    if (!account.account || leverageInitialized.current) return;
+    leverageInitialized.current = true;
+    const position = account.account.positions.find(p => p.coin === market.coin);
+    if (leverageBehavior === 'position' && position && !edited.current && draft.size === 0) {
+      setDraft(old => ({ ...old, leverage: Math.min(market.maxLeverage, position.leverage.value), marginMode: market.onlyIsolated ? 'isolated' : position.leverage.type }));
+    }
+  }, [account.account, leverageBehavior, market.coin]);
   useEffect(() => { if (limitPrice != null) { setDraft(old => ({ ...old, kind: 'limit', limitPrice })); clientId.current = crypto.randomUUID(); onClearPrice?.(); } }, [limitPrice]);
   const ticket = useMemo<TicketRequest>(() => ({ ...draft,
     market: { coin: market.coin, dex: market.dex, assetId: market.assetId, szDecimals: market.szDecimals, maxLeverage: market.maxLeverage, onlyIsolated: market.onlyIsolated, mark: market.mark ?? 0, deployerFeeScale: market.deployerFeeScale ?? (market.dex ? 1 : 0), growthMode: market.growthMode === 'enabled', collateral: market.collateral, marginTiers: market.marginTiers },
@@ -158,6 +169,7 @@ export function OrderTicket({ market, book, width, focused, limitPrice, onClearP
     ]} />
     {configuredBuilder(account.network) ? <Box paddingX={1}><Text fg={colors.textDim}>including Gloom's 0.1% builder fee</Text></Box> : null}
     {preview?.errors.length && draft.size > 0 ? <Box paddingX={1}><Notice tone="negative">{preview.errors.join(' ')}</Notice></Box> : null}
+    {preview?.warnings.length && (draft.size > 0 || draft.kind === 'twap') ? <Box paddingX={1}><Notice tone="warning">{preview.warnings.join(' ')}</Notice></Box> : null}
   </ScrollBox>
     {account.status?.mode !== 'trading' ? <Box paddingX={1} paddingY={1}><Button label={account.status?.mode === 'watch' ? 'Connect a trading wallet' : 'Connect wallet'} onPress={() => app.createPaneFromTemplate('hyperliquid-setup-new')} variant="primary" /></Box> : <Box paddingX={1} paddingY={1} flexDirection="row" flexWrap="wrap" gap={1}>
       <Button label={busy ? 'Submitting...' : `${draft.side === 'buy' ? 'Buy / Long' : 'Sell / Short'} ${market.symbol}`} variant={draft.side === 'buy' ? 'primary' : 'danger'} active={active === 'submit'} disabled={busy || !preview || preview.errors.length > 0 || !!error} onPress={() => void submit()} />

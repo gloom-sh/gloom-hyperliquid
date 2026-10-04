@@ -114,6 +114,6 @@ export const hyperliquidCli: CliCommandDef = {
       }
       return { kind: 'handled' };
     } catch (error) { process.stderr.write(`${redactCliError(error)}\n`); process.exitCode = 1; return { kind: 'handled' }; }
-    finally { service?.dispose(); shared?.dispose(); resources?.persistence.close(); }
+    finally { await service?.dispose(); shared?.dispose(); resources?.persistence.close(); }
   },
 };

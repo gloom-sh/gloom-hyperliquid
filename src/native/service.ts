@@ -8,6 +8,7 @@ import { previewTicket } from '../trading/orders';
 import { checkRegion, REGION_POLICY } from '../trading/regions';
 import { DEFAULT_TRADING_SETTINGS, type AccountSnapshot, type Address, type Network, type SharedTransport, type TicketRequest, type TradingMarket, type TradingOperation, type TradingResult, type TradingSettings, type TradingStatus } from '../trading/types';
 import { KeyStore } from './storage';
+import { LocalTwapScheduler, type LocalTwapJob } from './twap';
 import { approveApiWallet } from './main-wallet';
 import { singleAttemptExchangeTransport } from './exchange-transport';
 import { startWalletPage } from './wallet-page';
@@ -18,7 +19,7 @@ const address=(value:unknown):Address=>{if(typeof value!=='string'||!isAddress(v
 
 export function createTradingService(options:TradingServiceOptions) {return new TradingService(options);}
 export class TradingService {
-  private store:KeyStore;private accounts:AccountStore;private status:TradingStatus;private ready:Promise<void>;
+  private store:KeyStore;private accounts:AccountStore;private status:TradingStatus;private ready:Promise<void>;private twaps:LocalTwapScheduler;private lastSnapshotAccount?:AccountSnapshot|null;
   private walletPage?:ReturnType<typeof startWalletPage>;private results=new Map<string,TradingResult>();
   private pending=new Map<string,Promise<TradingResult>>();private listeners=new Set<()=>void>();
   private markets=new Map<string,TradingMarket>();private marketTime=0;private marketAsOf=new Map<string,number>();private poll?:ReturnType<typeof setInterval>;private lastRoleCheck=0;private roleCheck?:Promise<TradingStatus>;private marketRelease?:()=>void;private lease?:ReturnType<typeof setTimeout>;private signedInFlight=0;private transitioning=false;private builderChecked=0;private snapshotCache?:{status:TradingStatus;account:AccountSnapshot|null};
@@ -26,7 +27,8 @@ export class TradingService {
     this.store=new KeyStore(options.dataDir,options.network);this.accounts=new AccountStore(options.network,options.shared);
     this.status={network:options.network,mode:'disconnected',riskAcknowledged:false,eligibleAcknowledged:false};
     this.accounts.subscribe(()=>this.emit());
-    this.ready=this.initialize();
+    this.twaps=new LocalTwapScheduler({read:()=>this.store.readJson<LocalTwapJob[]>('local-twaps.json',[]),write:jobs=>this.store.writeJson('local-twaps.json',jobs),acquire:id=>this.store.acquireTwapLease(id),execute:ticket=>this.invoke('submit',{ticket,confirmed:true,expectedAddress:ticket.accountAddress}),mark:async coin=>(await this.market(coin)).mark,onChange:()=>{this.emit();if(this.twaps?.getJobs().some(j=>j.status==='running'))void this.activate()?.catch(error=>{this.status.error=errorText(error);this.emit();});else if(!this.listeners.size&&!this.lease)this.suspend();}});
+    this.ready=Promise.all([this.initialize(),this.twaps.ready]).then(()=>{});
   }
   private async initialize() {
     const profile=await this.store.readProfile();Object.assign(this.status,profile);
@@ -34,9 +36,10 @@ export class TradingService {
 
   }
   subscribe(listener:()=>void){this.listeners.add(listener);void this.ready.then(()=>this.activate()).catch(error=>{this.status.error=errorText(error);this.emit();});return()=>{this.listeners.delete(listener);if(!this.listeners.size)this.suspend();};}
-  getSnapshot(){const account=this.accounts.getSnapshot()??null;if(this.snapshotCache?.account!==account)this.snapshotCache=undefined;return this.snapshotCache??(this.snapshotCache={status:{...this.status},account});}
+  private withTwaps(account:AccountSnapshot){return {...account,twaps:[...account.twaps,...this.twaps.rows(account.address)]};}
+  getSnapshot(){const account=this.accounts.getSnapshot()??null;if(this.lastSnapshotAccount!==account)this.snapshotCache=undefined;this.lastSnapshotAccount=account;return this.snapshotCache??(this.snapshotCache={status:{...this.status},account:account?this.withTwaps(account):null});}
   private activate(){if(!this.status.address)return;if(!this.marketRelease)this.marketRelease=this.options.shared.subscribe?.(()=>{});if(this.status.address)return this.accounts.setAddress(this.status.address);}
-  private suspend(){if(this.lease)clearTimeout(this.lease);this.lease=undefined;this.marketRelease?.();this.marketRelease=undefined;this.accounts.stop();}
+  private suspend(force=false){if(!force&&this.twaps?.getJobs().some(j=>j.status==='running'))return;if(this.lease)clearTimeout(this.lease);this.lease=undefined;this.marketRelease?.();this.marketRelease=undefined;this.accounts.stop();}
   private touch(){if(!this.listeners.size){if(this.lease)clearTimeout(this.lease);this.lease=setTimeout(()=>this.suspend(),15_000);this.lease.unref();}return this.activate();}
   private emit(){this.snapshotCache=undefined;for(const listener of this.listeners)listener();}
   private settings():TradingSettings {return {...DEFAULT_TRADING_SETTINGS,...this.options.settings?.(),builder:configuredBuilder(this.options.network)};}
@@ -66,7 +69,7 @@ export class TradingService {
     this.marketTime=Date.now();
   }
   private async market(coin:string) {await this.loadMarkets();const result=this.markets.get(coin);if(!result)throw new Error('Market is unavailable or delisted.');if(Date.now()-(this.marketAsOf.get(coin)??0)>60_000)throw new Error('This market price is stale. Wait for a new market update.');return result;}
-  private async account(){await this.touch();if(!this.status.address)throw new Error('Add a watch-only address or connect your wallet.');return this.accounts.getSnapshot()??await this.accounts.setAddress(this.status.address);}
+  private async account(){await this.touch();if(!this.status.address)throw new Error('Add a watch-only address or connect your wallet.');return this.withTwaps(this.accounts.getSnapshot()??await this.accounts.setAddress(this.status.address));}
   private async preview(input:TicketRequest,force=false){
     if(force)await this.loadMarkets(true);
     const market=await this.market(input.market.coin);await this.account();const snapshot=force?await this.accounts.refreshRisk(market.dex):await this.account();
@@ -97,11 +100,11 @@ export class TradingService {
       try{
         const response=await send();const serialized=JSON.stringify(response);const errors:string[]=[];
         const walk=(value:any)=>{if(value&&typeof value==='object'){if(typeof value.error==='string')errors.push(value.error);for(const child of Object.values(value))walk(child);}};walk(response);
-        result={...initial,state:errors.length?'rejected':'accepted',message:errors.length?`Some or all orders were rejected: ${errors.join('; ')}. Inspect each order before resubmitting.`:'Accepted by Hyperliquid.',response:JSON.parse(serialized)};
+        result={...initial,state:errors.length?'rejected':'accepted',message:errors.length?`Some or all orders were rejected: ${errors.join('; ')}. Inspect each order before resubmitting.`:(response as any)?.response?.type==='localTwap'?'Local TWAP scheduled. Keep Gloom running; each slice includes the builder fee.':'Accepted by Hyperliquid.',response:JSON.parse(serialized)};
       }catch(error){
         // API-level rejection is definitive. All transport failures remain unknown.
         const definitive=error instanceof Error&&error.name==='ApiRequestError';
-        result={...initial,state:definitive?'rejected':'unknown',message:errorText(error)};
+        result={...initial,state:definitive?'rejected':'unknown',message:errorText(error),...(definitive?{response:(error as any).response}:{})};
       }
       this.results.set(id,result);await this.saveResults();void this.accounts.refresh().catch(()=>{});
       return result.state==='unknown'?this.reconcile(result):result;
@@ -120,6 +123,7 @@ export class TradingService {
     const built=await this.preview(ticket,true);if(built.preview.errors.length)throw new Error(built.preview.errors.join(' '));this.confirm(confirmed,built.preview.warnings);
     const cloids=built.preview.order?.orders.flatMap(o=>o.c?[o.c]:[])??[];
     return this.once(ticket.clientId,cloids,async()=>{
+      if(built.preview.twap&&this.settings().builder){const job=await this.twaps.start({...built.ticket,accountAddress:this.status.address},built.preview.size,built.preview.notional);return {status:'ok',response:{type:'localTwap',data:{twapId:job.id}}};}
       const exchange=await this.exchange();
       // Leverage is set explicitly before entry; a timeout here prevents the order from being sent.
       if(!ticket.reduceOnly&&!ticket.positionTpsl)await exchange.updateLeverage({asset:built.ticket.market.assetId,isCross:ticket.marginMode==='cross',leverage:ticket.leverage});
@@ -154,7 +158,7 @@ export class TradingService {
     await this.ready;
     if(this.transitioning||this.signedInFlight||this.pending.size)throw new Error('Wait for the current trading request before connecting a wallet.');
     this.transitioning=true;
-    try{return await this.store.tradingLock(async()=>{
+    try{for(const job of this.twaps.getJobs())if(job.status==='running'||job.status==='paused')await this.twaps.cancel(job.id);return await this.store.tradingLock(async()=>{
       await this.guard(false);
       let wallet;try{wallet=privateKeyToAccount(privateKey);}catch{throw new Error('Invalid main-wallet key.');}
       const reusable=this.status.mode==='pending'&&this.status.address?.toLowerCase()===wallet.address.toLowerCase()&&this.status.agentAddress&&this.status.storage&&this.status.expiresAt&&this.status.expiresAt>Date.now();
@@ -175,12 +179,12 @@ export class TradingService {
   }
   async invoke(operation:TradingOperation|string,payload:any={}):Promise<any>{
     await this.ready;
-    const transitions=['watch','connect','import','disconnect'].includes(operation),signed=['submit','cancel','modify','leverage','margin','close','reverse','closeAll','twapCancel'].includes(operation);
+    const transitions=['watch','connect','import','disconnect'].includes(operation),signed=['submit','cancel','modify','leverage','margin','close','reverse','closeAll','twapCancel','twapResume'].includes(operation);
     if(transitions&&(this.transitioning||this.signedInFlight>0))throw new Error('Wait for the current trading request before changing accounts.');
     if(signed&&payload.expectedAddress&&String(payload.expectedAddress).toLowerCase()!==this.status.address?.toLowerCase())throw new Error('The connected account changed. Review the order again.');
     if((signed||operation==='preview')&&this.transitioning)throw new Error('Wait for the wallet change to finish.');
     if(transitions){this.transitioning=true;this.builderChecked=0;}if(signed)this.signedInFlight++;
-    try{return transitions?await this.store.tradingLock(()=>this.execute(operation,payload)):await this.execute(operation,payload);}finally{if(transitions)this.transitioning=false;if(signed)this.signedInFlight--;}
+    try{if(transitions){for(const job of this.twaps.getJobs())if(job.status==='running'||job.status==='paused')await this.twaps.cancel(job.id);return await this.store.tradingLock(()=>this.execute(operation,payload));}if(signed&&this.status.address)await this.touch();return await this.execute(operation,payload);}finally{if(transitions)this.transitioning=false;if(signed)this.signedInFlight--;}
   }
   private async execute(operation:TradingOperation|string,payload:any={}):Promise<any>{
     switch(operation){
@@ -211,7 +215,14 @@ export class TradingService {
       case 'margin':{await this.guard();const market=await this.market(payload.coin),amount=Number(payload.amount);if(!Number.isFinite(amount)||!amount)throw new Error('Enter a nonzero margin change in USD.');const position=(await this.account()).positions.find(p=>p.coin===market.coin);if(position?.leverage.type!=='isolated')throw new Error('Only isolated positions support margin changes.');if(amount<0&&market.marginMode==='strictIsolated')throw new Error('Strict isolated markets do not allow margin removal.');this.confirm(payload.confirmed);const exchange=await this.exchange();return this.once(payload.clientId??crypto.randomUUID(),[],()=>exchange.updateIsolatedMargin({asset:market.assetId,isBuy:Number(position.szi)>0,ntli:Math.trunc(amount*1e6)}));}
       case 'cancel':{await this.guard();this.confirm(payload.confirmed);const snapshot=await this.accounts.refresh();const selected=snapshot.orders.filter(o=>(!payload.coin||o.coin===payload.coin)&&(payload.oid===undefined||o.oid===Number(payload.oid)));if(!selected.length)throw new Error('No matching open orders.');await this.loadMarkets();const cancels=selected.map(o=>{const m=this.markets.get(o.coin);if(!m)throw new Error('Cannot resolve market for order.');return {a:m.assetId,o:o.oid};});const exchange=await this.exchange();return this.once(payload.clientId??crypto.randomUUID(),[],()=>exchange.cancel({cancels}));}
       case 'modify':{await this.guard();const built=await this.preview(payload.ticket,true);if(built.preview.errors.length)throw new Error(built.preview.errors.join(' '));if(!built.preview.order||built.preview.order.orders.length!==1)throw new Error('Modify supports one order at a time.');this.confirm(payload.confirmed,built.preview.warnings);const existing=(await this.account()).orders.find(o=>o.oid===Number(payload.oid));if(!existing||existing.coin!==built.ticket.market.coin)throw new Error('Order is no longer open in this market.');const order=built.preview.order.orders[0]!;if(existing.isTrigger&&!('trigger' in order.t))throw new Error('Modifying a trigger order must preserve its trigger type and price.');if(existing.isPositionTpsl)throw new Error('Use position TP/SL to replace a position-level bracket.');const exchange=await this.exchange();return this.once(payload.ticket.clientId,order.c?[order.c]:[],()=>exchange.modify({oid:Number(payload.oid),order} as ModifyParameters));}
-      case 'twapCancel':{await this.guard();this.confirm(payload.confirmed);const market=await this.market(payload.coin),exchange=await this.exchange();if(!Number.isInteger(payload.twapId))throw new Error('Invalid TWAP id.');return this.once(payload.clientId??crypto.randomUUID(),[],()=>exchange.twapCancel({a:market.assetId,t:payload.twapId}));}
+      case 'twapResume':{
+        await this.guard();this.confirm(payload.confirmed);const job=this.twaps.getJobs().find(j=>j.id===payload.twapId);if(!job)throw new Error('Local TWAP not found.');if(job.ticket.accountAddress?.toLowerCase()!==this.status.address?.toLowerCase())throw new Error('Reconnect the original TWAP account before resuming.');const resumed=await this.twaps.resume(job.id);return {state:'accepted',message:'Local TWAP resumed. Keep Gloom running.',twapId:resumed.id};
+      }
+      case 'twapCancel':{
+        this.confirm(payload.confirmed);
+        if(typeof payload.twapId==='string'&&payload.twapId.startsWith('local:')){const job=await this.twaps.cancel(payload.twapId);return {state:'accepted',message:job.reason,twapId:job.id};}
+        await this.guard();const market=await this.market(payload.coin),exchange=await this.exchange();if(!Number.isInteger(payload.twapId))throw new Error('Invalid TWAP id.');return this.once(payload.clientId??crypto.randomUUID(),[],()=>exchange.twapCancel({a:market.assetId,t:payload.twapId}));
+      }
       case 'close':case 'reverse':{await this.guard();const snapshot=await this.accounts.refresh(),position=snapshot.positions.find(p=>p.coin===payload.coin);if(!position)throw new Error('Position is no longer open.');const market=await this.market(position.coin);const percent=operation==='reverse'?200:Number(payload.percent??100);if(!Number.isFinite(percent)||percent<=0||percent>(operation==='reverse'?200:100))throw new Error('Close percentage must be greater than 0 and at most 100.');return this.submit({market,side:Number(position.szi)>0?'sell':'buy',kind:payload.kind??'market',limitPrice:payload.limitPrice,size:Math.abs(Number(position.szi))*percent/100,sizeUnit:'coin',leverage:position.leverage.value,marginMode:position.leverage.type,reduceOnly:operation==='close',clientId:payload.clientId},payload.confirmed);}
       case 'closeAll':{
         await this.guard();this.confirm(payload.confirmed);if(!payload.clientId)throw new Error('A stable close-all intent id is required.');
@@ -229,6 +240,6 @@ export class TradingService {
       default:throw new Error('Unknown trading operation.');
     }
   }
-  dispose(){this.shutdown();}
-  shutdown(){this.suspend();this.walletPage?.close();if(this.poll)clearInterval(this.poll);this.accounts.stop();this.listeners.clear();}
+  dispose(){return this.shutdown();}
+  shutdown(){this.suspend(true);const stopped=this.twaps.dispose();this.walletPage?.close();if(this.poll)clearInterval(this.poll);this.accounts.stop();this.listeners.clear();return stopped;}
 }
