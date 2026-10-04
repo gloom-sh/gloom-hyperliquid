@@ -35,3 +35,11 @@ jobs:
 
       - run: bun run typecheck
       - run: bun test
+
+      - name: Validate plugin and desktop browser build
+        run: |
+          export GLOOMBERB_HOME="$RUNNER_TEMP/hyperliquid-profile"
+          mkdir -p "$GLOOMBERB_HOME"
+          echo "{\"dataDir\":\"$GLOOMBERB_HOME\",\"onboardingComplete\":true}" > "$GLOOMBERB_HOME/config.json"
+          bun "$RUNNER_TEMP/gloomberb/src/cli/entry.ts" plugin link "$GITHUB_WORKSPACE"
+          bun "$RUNNER_TEMP/gloomberb/src/cli/entry.ts" plugin doctor "$GITHUB_WORKSPACE"

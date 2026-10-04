@@ -6,6 +6,7 @@
       "name": "gloom-hyperliquid",
       "dependencies": {
         "@nktkas/hyperliquid": "^0.33.3",
+        "decimal.js": "^10.6.0",
         "viem": "^2.57.2",
       },
       "devDependencies": {
