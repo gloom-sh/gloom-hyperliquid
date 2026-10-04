@@ -475,7 +475,6 @@ export class TradingService {
       }
       this.results.set(id, result);
       await this.saveResults();
-      void this.accounts.refresh().catch(() => {});
       return result.state === "unknown" ? this.reconcile(result) : result;
     });
     this.pending.set(id, task);

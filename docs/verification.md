@@ -13,13 +13,13 @@ was never accessed. No paid API key or third-party project was created.
 | --- | --- | --- |
 | Live board | Done: default + all HIP-3 dexes, classes, favorites, position filter, search/sort and persisted liquidity filters | Mainnet and testnet live reads, shared WS soak and forced reconnect |
 | Market view | Done: real candles/volume, live book aggregation/depth, tape, stats, position/order levels, market metadata | Live terminal and desktop screenshot renderers |
-| Historical analytics | Client/UI done: cloud history, funding extremes, OI changes and premium rankings; no local recorder | Platform PR #626 contract fixtures pass. Routes currently return 404 and public host API lacks authenticated Cloud requests. Live Pro history remains blocked by those integrations |
+| Historical analytics | Partial, awaiting host/server integration: client/UI implements cloud history, funding extremes, OI changes and premium rankings; no local recorder | Platform PR #626 contract fixtures pass. Routes currently return 404 and public host API lacks authenticated Cloud requests. Live Pro history remains blocked by those integrations |
 | Venue predictions / cash comparison | Done: exactly labelled Hyperliquid venue predictions, dated matching-USD host cash quotes and underlying action | Mainnet predictions live; cash projection checks; unavailable quotes stay blank |
 | Watch-only account | Done: live balances, collateral identities, account mode, positions, orders, fills, history, funding, ledger, fees and TWAP | Public vault with open positions, terminal interactions and both screenshot sizes |
 | Wallet connection | Done: injected browser wallets, local API-wallet approval, main-wallet fee approval, configurable loopback port/token and full URL, secure native import and scripted approval | Loopback security tests and scripted testnet validation. No live browser wallet or hardware-wallet signing in development |
 | Orders and management | Done: market/limit, TIF, conditional orders, entry/position TP/SL, scale, reduce-only, leverage/margin, modify/cancel, partial close/reverse/close-all | Precision/signing/risk/request tests and funded testnet lifecycle (results recorded below) |
 | TWAP | Done: testnet venue TWAP; mainnet local capped IOC slices with builder fee, pause/resume/cancel and persisted journal | Offline schedule/restart/uncertainty/race tests. Mainnet local execution intentionally not run live |
-| Funds | Done: main-wallet bridge deposit, withdraw3, spot/perp/dex transfer and unified-mode request | Typed-action tests; only throwaway testnet fund movements exercised. Real bridge deposit requires owner's later run |
+| Funds | Implemented; bridge execution partially verified: main-wallet deposit, withdraw3, spot/perp/dex transfer and unified-mode request | Typed-action checks. The single testnet withdraw3 attempt was rejected by the bridge with no debit. Real bridge deposit/withdrawal and browser signing remain for the owner |
 | Safety | Done: region/attestation gates, confirmations, fat-finger warnings, per-market stale checks, exact sizes, buying power, idempotency/reconciliation and persistent nonces | Unit tests plus testnet. Portfolio-margin opening trades blocked; legal review of country policy remains an owner task |
 | Host integration | Done: HLP primary with no PERP alias, separate panes, docked workspace, ticker action, catalog, headless and settings | Host collision search, fn/catalog, doctor and browser build |
 | Documentation | Done: methodology, keys/storage, fees, risk, regions, headless commands and SSH | README, hyperliquid.md and headless-trading.md |
@@ -81,5 +81,76 @@ signing, `viem` for wallet interoperability and independently checked EIP-712,
 and `decimal.js` for exact size/notional/scale arithmetic. Host and React stay
 peer dependencies.
 
-Final test counts, funded testnet results and cleanup status are appended after
-the final validation run.
+## Validation results (2026-10-04)
+
+- `bun run typecheck`: passed.
+- `bun test`: 74 passed, 343 assertions, zero failures across nine files.
+- `gloomberb plugin doctor hyperliquid`: all checks passed, including the desktop
+  browser entry (343 KB at this revision).
+- `fn HLP BTC --json`: real market and order book, with the explicit Cloud
+  history-unavailable result. `fn HLP --network testnet --limit 5 --json`:
+  complete, five rows, no errors. Catalog contains HLP/HLM/HLB/HLA/HLF/HLS.
+- Mainnet transport soak: more than three minutes, 98 board and 134 detail
+  updates, nine mark changes; forced reconnect recovered in about 1.3 seconds.
+  Testnet: more than three minutes, 92 board and 130 detail updates, seven mark
+  changes; recovered in about 1.24 seconds. Sockets stopped after disposal.
+- Terminal: HLP BTC, chart/book/ticket, keyboard wallet navigation, public
+  watch-only account with 177 positions, and mainnet/testnet switching verified.
+  A false account-change race discovered here was fixed and retested. Footer
+  status, TESTNET and watch-only indicators were visible. Bounded logs contained
+  no React hook/update-depth/listener warnings. Our tmux session was stopped.
+- All 13 screenshots were opened and reviewed: five required views at both
+  sizes, plus compact ticket and both predicted-funding views. Cloud history
+  shows its true unavailable state; predicted-funding tables use live data.
+
+## Funded testnet evidence
+
+Only the generated throwaway account
+`0x3dD36eb4677E32b42EA46dB1C936DDDBbfbf0459` was used. The owner supplied 499 mock
+USDC after the unsigned faucet rejected the address for lacking mainnet history.
+Testnet skips builder fees and builder approval.
+
+The service lifecycle passed approveAgent, ALO limit, modify, cancel, a BTC market
+fill with attached TP/SL, position-level TP/SL, cancellation of both bracket
+variants, 50% close, reverse and close-all. That phase ended with zero positions,
+orders and TWAPs. The native CLI separately passed connect-key from a protected
+file, resting order, cancellation, market fill and full close; every command
+exited zero. Its account finished flat with 498.942231 mock USDC at that checkpoint.
+
+Public evidence lives under
+`~/.local/state/gloom-pm/hyperliquid/verification/testnet-wallet-p80HTX/`:
+`funded-evidence.json` and `cli-evidence.json`. These supersede the earlier
+unfunded-only evidence. Generated testnet credentials remain in owner-only files
+in the isolated test directories, outside the repository. No production key was
+created or accessed.
+
+Mainnet signed behavior, browser/hardware-wallet signing and real bridge deposits
+remain for the owner's later fresh-wallet round trip. The builder address is
+already configured; no mainnet key needs to be supplied to development. A legal
+review of the conservative region list and public Cloud auth transport remain
+follow-ups.
+
+
+Additional funded checks passed isolated margin add/remove, leverage changes,
+two-leg scale orders and cancellation, standalone stop-limit/TP-limit orders and
+cancellation, and native TWAP start/cancel (its first fill was closed). The local
+persisted scheduler sent two real testnet IOC fills of 0.00018 BTC each with a
+controlled test clock, paused after restart, required explicit resume, and then
+closed the combined 0.00036 BTC position. This verifies scheduler execution and
+restart behavior; it is not a full-duration mainnet execution test.
+
+The actual `import-key` command passed using the already-approved generated key
+from an owner-only file, including exchange expiry verification. No secret was
+printed. The single `withdraw3` request for 2 mock USDC to the same throwaway
+address received the definitive exchange error `Error withdrawing from bridge`;
+there was no debit or withdrawal ledger entry. It was not retried.
+
+Final independent REST and WebSocket checks at **2026-10-04 00:56:23 UTC** showed
+**498.881492 mock USDC, zero positions, zero open orders and zero active TWAPs**.
+All verification helpers exited. Our tmux sessions and screenshot processes were
+stopped; no shared checkout or unrelated processes were changed.
+
+Additional public evidence files in the same owner-only verification directory:
+`extra-evidence.json`, `local-twap-evidence.json`, `import-evidence.json`,
+`withdraw-evidence.json`, and `final-evidence.json`. The older
+`trading-security.md` summary has been updated to point to these funded results.

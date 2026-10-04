@@ -157,7 +157,7 @@ export class AccountStore {
   }
   async setAddress(address: Address) {
     if (this.address?.toLowerCase() === address.toLowerCase())
-      return this.inflight ?? this.getSnapshot() ?? this.refresh();
+      return this.getSnapshot() ?? this.inflight ?? this.refresh();
     this.stop();
     this.address = address;
     this.states.clear();
