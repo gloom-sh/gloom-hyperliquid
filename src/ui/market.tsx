@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Box, ScrollBox } from "gloomberb/ui";
+import { Box, ScrollBox, Text } from "gloomberb/ui";
 import {
   KeyValueRow,
   PaneStatusBody,
@@ -15,15 +15,28 @@ import {
   usePluginAppActions,
   usePluginPaneState,
 } from "gloomberb/react";
+import { colors } from "gloomberb/theme";
 import type { PaneProps } from "gloomberb/types/plugin";
 import {
   resolveMarket,
   CANDLE_INTERVALS,
   type CandleInterval,
+  type Market,
 } from "../market";
 import { loadCashReference, type CashReference } from "../cash";
 import { getMarketService } from "../runtime";
-import { compact, dateTime, percent, price, tone } from "./format";
+import {
+  bookTickOptions,
+  compactAxis,
+  countdown,
+  dateTime,
+  fundingRate,
+  fundingTone,
+  percent,
+  price,
+  tone,
+  usdCompact,
+} from "./format";
 import {
   useAccount,
   useBoard,
@@ -33,7 +46,6 @@ import {
 } from "./hooks";
 import { CandleChart } from "./charts";
 import {
-  BOOK_PRECISION_OPTIONS,
   bookPrecisionConfig,
   bookPrecisionValue,
   BookView,
@@ -150,7 +162,7 @@ export function MarketView({
     dense: true,
     ...(embedded ? { queryBarWidth: width } : {}),
   });
-  const seconds = Math.ceil((3_600_000 - (now % 3_600_000)) / 1000);
+  const untilFunding = 3_600_000 - (now % 3_600_000);
   useLiveFooter(
     "hyperliquid-market",
     snapshot,
@@ -197,17 +209,17 @@ export function MarketView({
     ? [
         { label: "Mark", value: price(market.mark, market.szDecimals) },
         {
-          label: "24h rolling",
+          label: "24h change",
           value: percent(market.change24h),
-          color: tone(market.change24h),
+          color: tone(market.change24h, 2),
         },
         {
-          label: "Current /1h",
-          value: percent(market.fundingHourly, 4),
-          detail: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`,
-          color: tone(market.fundingHourly),
+          label: "Funding /1h",
+          value: fundingRate(market.fundingHourly),
+          detail: countdown(untilFunding),
+          color: fundingTone(market.fundingHourly),
         },
-        { label: "Open interest", value: `$${compact(market.oiUsd)}` },
+        { label: "Open interest", value: usdCompact(market.oiUsd) },
         ...(height >= 20
           ? [
               {
@@ -217,15 +229,13 @@ export function MarketView({
               {
                 label: "Premium",
                 value: percent(market.premium),
-                color: tone(market.premium),
+                color: tone(market.premium, 2),
               },
-              { label: "24h volume", value: `$${compact(market.volume24h)}` },
+              { label: "24h volume", value: usdCompact(market.volume24h) },
               {
                 label: "Max leverage",
                 value: `${market.maxLeverage}x`,
-                detail: market.onlyIsolated
-                  ? "Isolated only"
-                  : market.collateral,
+                detail: market.onlyIsolated ? "isolated only" : undefined,
               },
             ]
           : []),
@@ -253,9 +263,13 @@ export function MarketView({
           ? [
               {
                 id: "precision",
-                label: "Book",
+                label: tab === "Book" ? "Tick" : "Book tick",
                 value: bookPrecisionValue(snapshot.book),
-                options: BOOK_PRECISION_OPTIONS,
+                options: bookTickOptions(
+                  snapshot.book?.mid ?? market?.mark,
+                  market?.szDecimals,
+                  bookPrecisionValue(snapshot.book),
+                ),
                 onChange: (value: string) =>
                   getMarketService(snapshot.network).setBookAggregation(
                     coin,
@@ -267,7 +281,14 @@ export function MarketView({
       ]}
       meta={
         market
-          ? `${market.assetClass}${market.alwaysOpen ? " · 24/7" : ""} · ${market.dex || "Native"} · ${market.collateral}`
+          ? [
+              market.assetClass,
+              market.alwaysOpen ? "24/7" : "",
+              market.dex,
+              market.collateral,
+            ]
+              .filter(Boolean)
+              .join(" · ")
           : undefined
       }
     />
@@ -344,6 +365,8 @@ export function MarketView({
                 width={width}
                 height={6}
                 focused={false}
+                first={market.coin}
+                loading={account.loading}
               />
             </Box>
           </Box>
@@ -406,94 +429,122 @@ export function MarketView({
             height={bodyHeight}
             focused={focused}
             market={market?.coin}
+            loading={account.loading}
           />
         ) : null}
         {market && tab === "Info" ? (
-          <ScrollBox
-            flexGrow={1}
-            contentOptions={{ flexDirection: "column", padding: 1, gap: 1 }}
-          >
-            {cash ? (
-              <Section title="Cash reference">
-                <KeyValueRow
-                  label={cash.label}
-                  value={`${price(cash.price)} USD`}
-                />
-                <KeyValueRow
-                  label="Perpetual premium"
-                  value={percent((market.mark ?? cash.price) / cash.price - 1)}
-                />
-                <KeyValueRow
-                  label="Cash as of UTC"
-                  value={cash.sessionDate ?? dateTime(cash.asOf)}
-                />
-              </Section>
-            ) : null}
-            <Section title="Contract">
-              <KeyValueRow label="Market" value={market.coin} />
-              <KeyValueRow
-                label="Category"
-                value={
-                  snapshot.annotation?.category ??
-                  market.category ??
-                  market.assetClass
-                }
-              />
-              {snapshot.annotation?.description ? (
-                <KeyValueRow
-                  label="Underlying"
-                  value={snapshot.annotation.description}
-                />
-              ) : null}
-              <KeyValueRow
-                label="Lot size"
-                value={String(10 ** -market.szDecimals)}
-              />
-              <KeyValueRow
-                label="Price precision"
-                value={`5 significant digits, at most ${6 - market.szDecimals} decimals; integer prices allowed`}
-              />
-              <KeyValueRow
-                label="Margin"
-                value={
-                  market.onlyIsolated ? "Isolated only" : "Cross and isolated"
-                }
-              />
-              <KeyValueRow label="Collateral" value={market.collateral} />
-              <KeyValueRow
-                label="Funding cap /1h"
-                value={percent(market.fundingCap, 4, false)}
-              />
-              <KeyValueRow
-                label="Current funding /8h"
-                value={percent(market.funding8h, 4)}
-              />
-              <KeyValueRow
-                label="Current simple APR"
-                value={percent(market.fundingApr)}
-              />
-              {market.deployer ? (
-                <KeyValueRow label="Deployer" value={market.deployer} />
-              ) : null}
-              {market.oracleUpdater ? (
-                <KeyValueRow
-                  label="Oracle updater"
-                  value={market.oracleUpdater}
-                />
-              ) : null}
-            </Section>
-            <Section title="Margin tiers">
-              {market.marginTiers.map((t) => (
-                <KeyValueRow
-                  key={t.lowerBound}
-                  label={`From $${compact(t.lowerBound)}`}
-                  value={`${t.maxLeverage}x max · ${percent(1 / (t.maxLeverage * 2), 2, false)} maintenance`}
-                />
-              ))}
-            </Section>
-          </ScrollBox>
+          <MarketInfo
+            market={market}
+            category={snapshot.annotation?.category}
+            underlying={snapshot.annotation?.description}
+            cash={cash}
+            width={width}
+          />
         ) : null}
       </PaneStatusBody>
     </Box>
+  );
+}
+
+const INFO_LABEL_WIDTH = 16;
+const titleCase = (value: string) =>
+  value.charAt(0).toUpperCase() + value.slice(1);
+function MarketInfo({
+  market,
+  category,
+  underlying,
+  cash,
+  width,
+}: {
+  market: Market;
+  category?: string;
+  underlying?: string;
+  cash: CashReference | null;
+  width: number;
+}) {
+  const twoColumns = width >= 100;
+  const columnWidth = twoColumns ? Math.floor((width - 4) / 2) : width - 2;
+  const row = (label: string, value: string, color?: string) => (
+    <KeyValueRow
+      key={label}
+      label={label}
+      value={value}
+      color={color}
+      labelWidth={INFO_LABEL_WIDTH}
+      width={columnWidth}
+    />
+  );
+  const contract = (
+    <Section title="Contract">
+      {row("Category", titleCase(category ?? market.category ?? market.assetClass))}
+      {row("Lot size", String(10 ** -market.szDecimals))}
+      {row(
+        "Tick",
+        `5 significant digits, ${6 - market.szDecimals} decimals max`,
+      )}
+      {row("Margin", market.onlyIsolated ? "Isolated only" : "Cross or isolated")}
+      {row("Collateral", market.collateral)}
+      {market.deployer ? row("Deployer", market.deployer) : null}
+      {market.oracleUpdater ? row("Oracle updater", market.oracleUpdater) : null}
+      {underlying ? (
+        <Box width={columnWidth} paddingTop={1}>
+          <Text fg={colors.textDim} wrapText>
+            {underlying}
+          </Text>
+        </Box>
+      ) : null}
+    </Section>
+  );
+  const funding = (
+    <Box flexDirection="column">
+      <Section title="Funding">
+        {row(
+          "Current /8h",
+          fundingRate(market.funding8h),
+          fundingTone(market.funding8h),
+        )}
+        {row(
+          "Simple APR",
+          percent(market.fundingApr),
+          tone(market.fundingApr, 2),
+        )}
+        {row("Cap /1h", percent(market.fundingCap, 2, false))}
+      </Section>
+      {cash ? (
+        <Section title="Cash Reference">
+          {row(cash.label, `${price(cash.price)} USD`)}
+          {row(
+            "Perp premium",
+            percent((market.mark ?? cash.price) / cash.price - 1),
+            tone((market.mark ?? cash.price) / cash.price - 1, 2),
+          )}
+          {row("As of UTC", cash.sessionDate ?? dateTime(cash.asOf))}
+        </Section>
+      ) : null}
+      <Section title="Margin Tiers">
+        {market.marginTiers.map((t) =>
+          row(
+            `From $${compactAxis(t.lowerBound)}`,
+            `${t.maxLeverage}x max · ${percent(1 / (t.maxLeverage * 2), 2, false)} maintenance`,
+          ),
+        )}
+      </Section>
+    </Box>
+  );
+  // Sections carry their own top margin, so the containers add no gap.
+  return (
+    <ScrollBox
+      flexGrow={1}
+      contentOptions={{ flexDirection: "column", paddingX: 1 }}
+    >
+      <Box flexDirection={twoColumns ? "row" : "column"} gap={twoColumns ? 2 : 0}>
+        <Box width={columnWidth} flexDirection="column">
+          {contract}
+        </Box>
+        <Box width={columnWidth} flexDirection="column">
+          {funding}
+        </Box>
+      </Box>
+    </ScrollBox>
   );
 }

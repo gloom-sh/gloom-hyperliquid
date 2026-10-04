@@ -1,38 +1,33 @@
 import { useMemo, useState } from "react";
-import { Box, Text, useUiCapabilities } from "gloomberb/ui";
+import { Box, Text, TextAttributes } from "gloomberb/ui";
 import {
   DataTableView,
+  PaneStatusBody,
   QueryBar,
-  StatGrid,
   type DataTableColumn,
 } from "gloomberb/components";
 import { usePaneSettingValue, usePluginAppActions } from "gloomberb/react";
-import { colors } from "gloomberb/theme";
+import { blendHex, colors } from "gloomberb/theme";
 import type { PaneProps } from "gloomberb/types/plugin";
 import type { BookLevel, MarketSnapshot, OrderBook } from "../market";
 import { getMarketService } from "../runtime";
-import { compact, number, price, time } from "./format";
+import {
+  bookTickOptions,
+  compact,
+  missing,
+  number,
+  price,
+  size,
+  tick,
+  time,
+} from "./format";
 import { useMarket, useLiveFooter } from "./hooks";
 
-const COLUMNS: DataTableColumn[] = [
-  { id: "side", label: "Side", width: 4, align: "left" },
-  { id: "price", label: "Price", width: 13, align: "right" },
-  { id: "size", label: "Size", width: 12, align: "right" },
-  { id: "total", label: "Total", width: 12, align: "right" },
-];
 interface BookRow {
   id: string;
-  side: "Bid" | "Ask";
-  level: BookLevel;
+  side: "Bid" | "Ask" | "Spread";
+  level: BookLevel | null;
 }
-export const BOOK_PRECISION_OPTIONS = [
-  { value: "raw", label: "Full precision" },
-  ...[2, 3, 4].map((n) => ({
-    value: String(n),
-    label: `${n} significant digits`,
-  })),
-  ...[1, 2, 5].map((n) => ({ value: `5:${n}`, label: `5 digits, step ${n}` })),
-];
 export const bookPrecisionValue = (book?: OrderBook | null) =>
   book?.nSigFigs == null
     ? "raw"
@@ -48,6 +43,11 @@ export function bookPrecisionConfig(value: string) {
         ...(step ? { mantissa: Number(step) as 1 | 2 | 5 } : {}),
       };
 }
+/**
+ * The ladder: asks above, bids below, one mid/spread row between them. The
+ * depth bar is cumulative size and sits in the last column only. A row is
+ * highlighted only while the book has the keyboard.
+ */
 export function BookView({
   snapshot,
   width,
@@ -63,94 +63,123 @@ export function BookView({
   onPrice?: (value: number) => void;
   compactView?: boolean;
 }) {
-  const native = useUiCapabilities().nativePaneChrome;
   const [selected, setSelected] = useState<number | null>(null);
-  const levels = Math.max(3, Math.min(14, Math.floor((height - 4) / 2)));
-  const rows = useMemo<BookRow[]>(
-    () => [
-      ...(snapshot.book?.asks
+  const book = snapshot.book;
+  const szDecimals = snapshot.market?.szDecimals;
+  // Header and the spread row take two rows; the rest splits between sides.
+  const levels = Math.max(3, Math.min(40, Math.floor((height - 2) / 2)));
+  const rows = useMemo<BookRow[]>(() => {
+    if (!book) return [];
+    const asks = book.asks.slice(0, levels).reverse();
+    return [
+      ...asks.map((level, i) => ({
+        id: `ask-${asks.length - 1 - i}`,
+        side: "Ask" as const,
+        level,
+      })),
+      { id: "spread", side: "Spread" as const, level: null },
+      ...book.bids
         .slice(0, levels)
-        .reverse()
-        .map((level, i) => ({ id: `ask-${i}`, side: "Ask" as const, level })) ??
-        []),
-      ...(snapshot.book?.bids
-        .slice(0, levels)
-        .map((level, i) => ({ id: `bid-${i}`, side: "Bid" as const, level })) ??
-        []),
-    ],
-    [snapshot.book, levels],
+        .map((level, i) => ({ id: `bid-${i}`, side: "Bid" as const, level })),
+    ];
+  }, [book, levels]);
+  const max = Math.max(1, ...rows.map((r) => r.level?.totalSize ?? 0));
+  const bestAsk = Math.max(
+    0,
+    rows.findIndex((r) => r.side === "Spread") - 1,
   );
-  const max = Math.max(1, ...rows.map((r) => r.level.totalSize));
+  const reference = book?.mid ?? snapshot.market?.mark;
+  const columns: DataTableColumn[] = compactView
+    ? [
+        { id: "price", label: "Price", width: 11, align: "right" },
+        { id: "size", label: "Size", width: 9, align: "right" },
+        { id: "total", label: "Total", width: 10, align: "right" },
+      ]
+    : [
+        { id: "price", label: "Price", width: 13, align: "right" },
+        { id: "size", label: "Size", width: 13, align: "right" },
+        { id: "total", label: "Total", width: 14, align: "right" },
+        { id: "totalUsd", label: "Total USD", width: 12, align: "right" },
+      ];
+  const barColumn = columns.at(-1)!.id;
   return (
     <DataTableView<BookRow>
       focused={focused}
       rootWidth={width}
       rootHeight={height}
       rootBackgroundColor={colors.panel}
-      columns={
-        compactView
-          ? [
-              { id: "price", label: "Price", width: 14, align: "right" },
-              { id: "size", label: "Size", width: 15, align: "right" },
-            ]
-          : COLUMNS
-      }
+      columns={columns}
       items={rows}
       getItemKey={(r) => r.id}
       sortColumnId={null}
       sortDirection="asc"
-      selection={{
-        kind: "index",
-        selectedIndex: selected,
-        onChange: setSelected,
-      }}
-      selectedTextOverridesCellColor
-      onActivate={(r) => onPrice?.(r.level.price)}
-      rootBefore={
-        <StatGrid
-          width={width}
-          columns={compactView ? 1 : 2}
-          items={[
-            {
-              label: "Spread",
-              value: price(snapshot.book?.spread, snapshot.market?.szDecimals),
-              detail:
-                snapshot.book?.spreadBps == null
-                  ? undefined
-                  : `${number(snapshot.book.spreadBps, 2)} bp`,
-            },
-            ...(!compactView
-              ? [
-                  {
-                    label: "Mid",
-                    value: price(
-                      snapshot.book?.mid,
-                      snapshot.market?.szDecimals,
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-        />
+      isNavigable={(r) => r.side !== "Spread"}
+      selection={
+        focused
+          ? {
+              kind: "index",
+              selectedIndex: selected ?? bestAsk,
+              onChange: setSelected,
+            }
+          : { kind: "none" }
       }
+      selectedTextOverridesCellColor
+      getRowBackgroundColor={(r) =>
+        r.side === "Spread"
+          ? blendHex(colors.panel, colors.border, 0.45)
+          : undefined
+      }
+      onActivate={(r) => r.level && onPrice?.(r.level.price)}
       renderCell={(row, column) => {
+        if (!row.level) {
+          if (column.id === "price")
+            return {
+              text: price(book?.mid, szDecimals),
+              value: book?.mid ?? null,
+              color: colors.textBright,
+              attributes: TextAttributes.BOLD,
+            };
+          if (column.id === "size")
+            return {
+              text: tick(book?.spread, reference, szDecimals),
+              value: book?.spread ?? null,
+              color: colors.textDim,
+            };
+          if (column.id === "total")
+            return {
+              text:
+                book?.spreadBps == null
+                  ? missing
+                  : `${number(book.spreadBps, 2)} bp`,
+              value: book?.spreadBps ?? null,
+              color: colors.textDim,
+            };
+          return { text: "" };
+        }
+        const level = row.level;
         const color = row.side === "Bid" ? colors.positive : colors.negative;
-        if (column.id === "side") return { text: row.side, color };
         if (column.id === "price")
           return {
-            text: price(row.level.price, snapshot.market?.szDecimals),
-            value: row.level.price,
+            text: price(level.price, szDecimals),
+            value: level.price,
             color,
             onMouseDown: onPrice
               ? (event: { stopPropagation?: () => void }) => {
                   event.stopPropagation?.();
-                  onPrice(row.level.price);
+                  onPrice(level.price);
                 }
               : undefined,
           };
         const value =
-          column.id === "size" ? row.level.size : row.level.totalSize;
-        const label = number(value, snapshot.market?.szDecimals ?? 3);
+          column.id === "size"
+            ? level.size
+            : column.id === "total"
+              ? level.totalSize
+              : level.totalUsd;
+        const label =
+          column.id === "totalUsd" ? compact(value) : size(value, szDecimals);
+        if (column.id !== barColumn) return { text: label, value };
+        const ratio = level.totalSize / max;
         return {
           text: label,
           value,
@@ -162,22 +191,31 @@ export function BookView({
               flexDirection="row"
               justifyContent="flex-end"
             >
-              <Box
-                position="absolute"
-                right={0}
-                top={0}
-                height={1}
-                width={`${Math.max(1, (row.level.totalSize / max) * 100)}%`}
-                backgroundColor={color}
-                style={native ? { opacity: 0.13 } : undefined}
-              />
-              <Text fg={colors.text}>{label}</Text>
+              {ratio > 0.02 ? (
+                <Box
+                  position="absolute"
+                  right={0}
+                  top={0}
+                  height={1}
+                  width={`${Math.min(100, ratio * 100)}%`}
+                  backgroundColor={blendHex(colors.panel, color, 0.2)}
+                />
+              ) : null}
+              {/* Positioned after the bar so the number paints above it. */}
+              <Box position="relative">
+                <Text fg={colors.text}>{label}</Text>
+              </Box>
             </Box>
           ),
         };
       }}
+      emptyContent={
+        !book && !snapshot.error ? (
+          <PaneStatusBody loading subject="order book" />
+        ) : undefined
+      }
       emptyStateTitle={
-        snapshot.error ? "Order book unavailable." : "Waiting for book levels."
+        snapshot.error ? "Order book unavailable." : "No book levels."
       }
       emptyStateHint={snapshot.error ?? undefined}
     />
@@ -202,9 +240,9 @@ export function TradeTape({
       columns={[
         { id: "time", label: "Time UTC", width: 9, align: "left" },
         { id: "side", label: "Side", width: 5, align: "left" },
-        { id: "price", label: "Price", width: 13, align: "right" },
-        { id: "size", label: "Size", width: 13, align: "right" },
-        { id: "value", label: "Value USD", width: 12, align: "right" },
+        { id: "price", label: "Price", width: 12, align: "right" },
+        { id: "size", label: "Size", width: 12, align: "right" },
+        { id: "value", label: "Value USD", width: 11, align: "right" },
       ]}
       items={snapshot.trades}
       getItemKey={(r) => r.id}
@@ -216,12 +254,24 @@ export function TradeTape({
           c.id === "time"
             ? time(r.time)
             : c.id === "side"
-              ? r.side.toUpperCase()
+              ? r.side === "buy"
+                ? "Buy"
+                : "Sell"
               : c.id === "price"
                 ? price(r.price, snapshot.market?.szDecimals)
                 : c.id === "size"
-                  ? number(r.size, snapshot.market?.szDecimals)
-                  : compact(r.price * r.size),
+                  ? size(r.size, snapshot.market?.szDecimals)
+                  : number(r.price * r.size, 0),
+        value:
+          c.id === "time"
+            ? new Date(r.time).toISOString()
+            : c.id === "price"
+              ? r.price
+              : c.id === "size"
+                ? r.size
+                : c.id === "value"
+                  ? r.price * r.size
+                  : undefined,
         color:
           c.id === "price" || c.id === "side"
             ? r.side === "buy"
@@ -229,7 +279,14 @@ export function TradeTape({
               : colors.negative
             : undefined,
       })}
-      emptyStateTitle="Waiting for trades."
+      emptyContent={
+        !snapshot.trades.length &&
+        !snapshot.error &&
+        snapshot.status !== "live" ? (
+          <PaneStatusBody loading subject="trades" />
+        ) : undefined
+      }
+      emptyStateTitle="No trades yet."
     />
   );
 }
@@ -253,9 +310,13 @@ export function HyperliquidBookPane(props: PaneProps) {
         filters={[
           {
             id: "aggregation",
-            label: "Precision",
+            label: "Tick",
             value: bookPrecisionValue(snapshot.book),
-            options: BOOK_PRECISION_OPTIONS,
+            options: bookTickOptions(
+              snapshot.book?.mid ?? snapshot.market?.mark,
+              snapshot.market?.szDecimals,
+              bookPrecisionValue(snapshot.book),
+            ),
             onChange: (value) => {
               getMarketService(snapshot.network).setBookAggregation(
                 coin,
