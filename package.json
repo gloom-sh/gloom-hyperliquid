@@ -29,5 +29,11 @@
     "@types/bun": "^1.3.14",
     "@types/react": "^19.2.7",
     "typescript": "^5.9.3"
-  }
+  },
+  "dependencies": {
+    "@nktkas/hyperliquid": "^0.33.3",
+    "decimal.js": "^10.6.0",
+    "viem": "^2.57.2"
+  },
+  "browser": "index.browser.tsx"
 }

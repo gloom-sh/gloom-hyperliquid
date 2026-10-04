@@ -14,11 +14,49 @@
     "desktop"
   ],
   "hosts": [
-    "api.hyperliquid.xyz"
+    "api.hyperliquid.xyz",
+    "api.hyperliquid-testnet.xyz",
+    "www.cloudflare.com",
+    "arb1.arbitrum.io",
+    "sepolia-rollup.arbitrum.io",
+    "127.0.0.1",
+    "app.hyperliquid.xyz",
+    "api.gloom.sh"
   ],
   "contributes": {
     "panes": [
-      "hyperliquid"
+      "hyperliquid-board",
+      "hyperliquid-market",
+      "hyperliquid-book",
+      "hyperliquid-account",
+      "hyperliquid-analytics",
+      "hyperliquid-setup"
+    ],
+    "shortcuts": [
+      {
+        "code": "HLP",
+        "name": "Hyperliquid"
+      },
+      {
+        "code": "HLM",
+        "name": "Hyperliquid Market"
+      },
+      {
+        "code": "HLB",
+        "name": "Hyperliquid Book"
+      },
+      {
+        "code": "HLA",
+        "name": "Hyperliquid Account"
+      },
+      {
+        "code": "HLF",
+        "name": "Hyperliquid Analytics"
+      },
+      {
+        "code": "HLS",
+        "name": "Hyperliquid Wallet"
+      }
     ]
   },
   "minGloom": "0.15.0"
