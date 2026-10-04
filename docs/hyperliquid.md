@@ -135,11 +135,34 @@ position protection uses `positionTpsl`. TWAP and scale orders retain their own
 size and duration validation. A partial fill or a rejected child order remains
 an exchange outcome to inspect, not a successful full execution.
 
+The ticket keeps the everyday path on screen: side, Market, Limit or Stop
+(stop limit, take-profit, scale and TWAP are under **More**), the size in USD
+or coin, and one button that names the action or says why it cannot act yet.
+The 25, 50, 75 and 100% buttons size the order as a share of buying power at
+the chosen leverage, or of the position when reduce only is on. The
+**Cross 20x** button opens margin mode and leverage; the order sets them on the
+account when it is placed, and **Apply leverage** there sets them right away.
+TP/SL (as a price or as a % distance from the entry price), reduce only and
+time in force are under **Advanced**, which each pane remembers open or closed.
+In a wide pane the order figures, this market's position and its nearest open
+orders sit beside the inputs.
+
+From the keyboard, Tab, Shift+Tab, `j` and `k` walk the ticket's controls.
+Left and Right switch the side, order type, size unit, percentage and time in
+force. Enter or Space opens More, the margin dialog and Advanced, toggles reduce
+only and presses the action button; Enter in a field submits, and Esc leaves the
+ticket's controls.
+
 Ticket estimates include size rounding, margin, maker/taker fees and visible
-book slippage. Estimated liquidation is shown only where the isolated-position
-calculation is supported; existing positions use the exchange's liquidation
-price. A cross-margin account has shared risk and is not represented by a
-single-position liquidation guess.
+book slippage. The average fill and slippage appear only when a market order
+moves the price noticeably. Estimated liquidation is shown only where the
+isolated-position calculation is supported; existing positions use the
+exchange's liquidation price. A cross-margin account has shared risk and is not
+represented by a single-position liquidation guess.
+
+On the chart, open orders are quieter lines in the side's colour drawn over the
+candles (translucent on the desktop); the position's entry and liquidation keep
+full strength.
 
 The official Gloom builder fee is **0.1% (10 basis points) per perp fill**, in
 addition to exchange fees. The address and `f = 100` live in
