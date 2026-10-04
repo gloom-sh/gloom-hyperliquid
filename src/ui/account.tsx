@@ -411,7 +411,13 @@ function renderCell(row: Row, column: DataTableColumn): DataTableCell {
   }
   if (column.id === "side")
     return { text: String(value), color: SIDE_COLORS[String(value)] };
+  if (column.id === "status") return { text: statusLabel(String(value)) };
   return { text: String(value) };
+}
+/** Exchange status ids read as words: `marginCanceled` becomes `Margin canceled`. */
+function statusLabel(value: string) {
+  const words = value.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 export function HyperliquidAccountPane({ focused, width, height }: PaneProps) {
   const state = useAccount();
