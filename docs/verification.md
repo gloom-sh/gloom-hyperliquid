@@ -53,7 +53,7 @@ The loopback page sees only public API-wallet details, binds to `127.0.0.1`, use
 an unguessable token, checks host/origin context and expires after ten minutes.
 
 Every signed trading intent gets a persistent record before submission. Unknown
-outcomes are reconciled and never resent automatically. CLI writes require
+outcomes are reconciled and never resent automatically. Signed CLI order-management commands require
 explicit network, account, intent ID and confirmation. Local TWAP reuses these
 checks for each slice and pauses across process restarts or uncertainty.
 

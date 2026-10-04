@@ -152,8 +152,9 @@ the fee before the main wallet signs a maximum **0.1%** approval, the ticket say
 Hyperliquid's native TWAP action does not accept builder fees. Mainnet TWAP
 therefore runs locally as capped IOC slices, each with the same builder fee.
 Keep Gloom running: shutdown or restart pauses remaining slices, and resuming
-requires an explicit action. Unknown execution outcomes pause the schedule;
-inspect fills before resuming. Cancel stops future slices but cannot undo one
+requires an explicit action. Unknown execution outcomes pause the schedule and block resumption;
+inspect Orders and Fills, then cancel that uncertain schedule before creating a
+new intent for any remaining quantity. Cancel stops future slices but cannot undo one
 already submitted. Testnet uses the venue's native TWAP. The ticket discloses
 this difference before submission.
 
