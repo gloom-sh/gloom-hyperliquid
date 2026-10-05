@@ -4,7 +4,8 @@ A live perpetuals workspace for the terminal and desktop app: the default
 Hyperliquid dex and every active HIP-3 dex, market charts and books, funding
 and open interest, and self-custody order entry.
 
-Private development build for GLO-217. No registry listing or release.
+Install: `gloomberb install gloom-sh/gloom-hyperliquid` (needs Gloom 0.15.0 or newer), then restart.
+This is an early build for testers, not yet listed in the plugin registry.
 
 | Command | View |
 | --- | --- |
@@ -31,6 +32,8 @@ gloomberb fn HLP --network testnet --json
 
 Market data and watch-only accounts need no key. Trading uses a local API wallet
 approved by your browser wallet; the plugin never asks for a seed phrase.
+Trading is blocked in the United States and in sanctioned jurisdictions, as
+Hyperliquid's terms require; data and watch-only views work everywhere.
 See [connection, fees, risks and methodology](docs/hyperliquid.md).
 
 The official build charges Gloom's **0.1% builder fee per mainnet fill**,

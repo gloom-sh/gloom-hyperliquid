@@ -1,6 +1,6 @@
 # Hyperliquid implementation
 
-Tracking: GLO-217. The plugin remains private and is not registered or released.
+Early build for testers. It is not yet listed in the plugin registry.
 
 ## Integration boundary
 
