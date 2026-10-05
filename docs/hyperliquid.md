@@ -139,19 +139,25 @@ The ticket keeps the everyday path on screen: side, Market, Limit or Stop
 (stop limit, take-profit, scale and TWAP are under **More**), the size in USD
 or coin, and one button that names the action or says why it cannot act yet.
 The 25, 50, 75 and 100% buttons size the order as a share of buying power at
-the chosen leverage, or of the position when reduce only is on. The
-**Cross 20x** button opens margin mode and leverage; the order sets them on the
-account when it is placed, and **Apply leverage** there sets them right away.
+the chosen leverage, or of the position when reduce only is on.
+Leverage sits under the order types: drag or click its track, step it with
+`-` and `+`, type a number, or pick a common value (1x up to the market's
+maximum); Cross or Isolated is beside the common values. The order sets the
+leverage and margin mode on the account when it is placed. With an open
+position at another leverage or mode, **Apply 10x** appears and sets them
+right away, after the same confirmation.
 TP/SL (as a price or as a % distance from the entry price), reduce only and
 time in force are under **Advanced**, which each pane remembers open or closed.
 In a wide pane the order figures, this market's position and its nearest open
 orders sit beside the inputs.
 
 From the keyboard, Tab, Shift+Tab, `j` and `k` walk the ticket's controls.
-Left and Right switch the side, order type, size unit, percentage and time in
-force. Enter or Space opens More, the margin dialog and Advanced, toggles reduce
-only and presses the action button; Enter in a field submits, and Esc leaves the
-ticket's controls.
+Left and Right switch the side, order type, margin mode, size unit, percentage
+and time in force, and step the leverage (Shift+Left and Shift+Right jump
+between the common values); digits type a leverage. Enter or Space opens More
+and Advanced, toggles reduce only and presses Apply and the action button;
+Enter in the leverage applies it where Apply shows, Enter in another field
+submits, and Esc leaves the ticket's controls.
 
 Ticket estimates include size rounding, margin, maker/taker fees and visible
 book slippage. The average fill and slippage appear only when a market order
