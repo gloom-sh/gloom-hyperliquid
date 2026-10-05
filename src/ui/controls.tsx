@@ -20,6 +20,7 @@ import {
   KeyValueRow,
   MenuPopover,
   NumberField,
+  SegmentedControl,
 } from "gloomberb/components";
 import { useDialog } from "gloomberb/dialog";
 import { useShortcut } from "gloomberb/react";
@@ -392,121 +393,538 @@ export function MenuChoices<T extends string>({
   );
 }
 
-/** Leverage as a track: drag or click it; the dialog that holds it steps it with the arrows. */
-export function LeverageSlider({
+export type MarginMode = "cross" | "isolated";
+
+/** The leverages a click away on a market capped at `max`, ending with the cap. */
+function leverageStops(max: number): number[] {
+  const common = max <= 5 ? [1, 2, 3] : [1, 3, 5, 10, 20];
+  return [...common.filter((value) => value < max), max];
+}
+
+/** Cells the leverage track keeps before the cap beside the number gives way. */
+const MIN_TRACK = 14;
+
+const clampLeverage = (value: number, max: number) =>
+  Math.max(1, Math.min(max, Math.round(value)));
+
+/**
+ * Cells a segmented control takes: each option and a space either side in the
+ * terminal, its padding on the desktop.
+ */
+const segmentsWidth = (labels: string[]) =>
+  labels.reduce((total, label) => total + label.length + 2, 0);
+
+/**
+ * Leverage inline in the ticket, on two rows: the track with the number to
+ * type or step and the market's cap, then the common values and the margin
+ * mode. Left and Right step the number, Shift+Left/Right jump between the
+ * common values, digits type a new one.
+ */
+export function LeverageControl({
   value,
   max,
   onChange,
+  marginMode,
+  onlyIsolated,
+  onMarginMode,
+  active,
   focused,
+  onActivate,
   width,
+  labelWidth,
+  leverageRef,
+  marginRef,
 }: {
   value: number;
   max: number;
   onChange: (value: number) => void;
+  marginMode: MarginMode;
+  onlyIsolated: boolean;
+  onMarginMode: (mode: MarginMode) => void;
+  /** The part the ticket's field ring is on, if either. */
+  active: "leverage" | "margin" | null;
   focused: boolean;
+  onActivate: (part: "leverage" | "margin") => void;
   width: number;
+  labelWidth: number;
+  leverageRef?: (node: BoxRenderable | null) => void;
+  marginRef?: (node: BoxRenderable | null) => void;
 }) {
   const native = useUiCapabilities().nativePaneChrome;
-  const track = useRef<BoxRenderable | null>(null);
+  const stops = leverageStops(max);
+  const editing = focused && active === "leverage";
+  const change = (next: number) => {
+    const clamped = clampLeverage(next, max);
+    if (clamped !== value) onChange(clamped);
+  };
+  useShortcut(
+    (event) => {
+      if (event.name !== "left" && event.name !== "right") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const up = event.name === "right";
+      if (!event.shift) return change(value + (up ? 1 : -1));
+      const next = up
+        ? stops.find((stop) => stop > value)
+        : [...stops].reverse().find((stop) => stop < value);
+      if (next != null) change(next);
+    },
+    {
+      enabled: editing,
+      allowEditable: true,
+      phase: "before",
+      scope: "hyperliquid-leverage",
+    },
+  );
+
+  // The cap shows beside the number while the track keeps room to drag;
+  // otherwise the last common value names it.
+  const digits = String(max).length;
+  const stepperWidth = (native ? 7 : 8) + digits;
+  const showMax =
+    width - labelWidth - stepperWidth - (digits + 3) - 3 >= MIN_TRACK;
+  const chipLabel = (stop: number) =>
+    stop === max && stops.length > 1 && showMax ? "Max" : `${stop}x`;
+  // The common values give way until they share a row with the margin mode;
+  // 1x and the cap stay.
+  const chips = [...stops];
+  const room = width - segmentsWidth(["Cross", "Isolated"]) - (native ? 2 : 1);
+  for (const drop of [3, 2, 5, 20, 10]) {
+    if (segmentsWidth(chips.map(chipLabel)) <= room) break;
+    const at = chips.indexOf(drop);
+    if (at > 0 && drop < max) chips.splice(at, 1);
+  }
+  const marginReason = onlyIsolated
+    ? "This market trades isolated margin only"
+    : undefined;
+
+  return (
+    <Box
+      flexDirection="column"
+      width={width}
+      flexShrink={0}
+      {...(native ? { style: { rowGap: 6 } } : {})}
+    >
+      <Box
+        ref={leverageRef}
+        flexDirection="row"
+        width={width}
+        height={1}
+        gap={1}
+        alignItems="center"
+        flexShrink={0}
+      >
+        <Box width={labelWidth} flexShrink={0} overflow="hidden">
+          <Text fg={active === "leverage" ? colors.textBright : colors.textDim}>
+            Leverage
+          </Text>
+        </Box>
+        <LeverageTrack
+          value={value}
+          max={max}
+          stops={stops}
+          focused={editing}
+          onChange={change}
+        />
+        <LeverageStepper
+          value={value}
+          max={max}
+          active={active === "leverage"}
+          focused={focused}
+          onActivate={() => onActivate("leverage")}
+          onChange={change}
+        />
+        {showMax ? (
+          <Box flexShrink={0}>
+            <Text fg={colors.textDim}>{`/ ${max}x`}</Text>
+          </Box>
+        ) : null}
+      </Box>
+      <Box
+        flexDirection="row"
+        width={width}
+        height={1}
+        gap={1}
+        alignItems="center"
+        flexShrink={0}
+      >
+        <SegmentedControl
+          value={chips.includes(value) ? String(value) : ""}
+          options={chips.map((stop) => ({
+            value: String(stop),
+            label: chipLabel(stop),
+          }))}
+          onChange={(next) => change(Number(next))}
+        />
+        <Box flexGrow={1} />
+        <Box
+          ref={marginRef}
+          flexShrink={0}
+          {...(native && marginReason ? { title: marginReason } : {})}
+        >
+          <SegmentedControl
+            value={onlyIsolated ? "isolated" : marginMode}
+            options={[
+              { value: "cross", label: "Cross", disabled: onlyIsolated },
+              { value: "isolated", label: "Isolated" },
+            ]}
+            onChange={(next) => {
+              onActivate("margin");
+              if (next !== marginMode) onMarginMode(next as MarginMode);
+            }}
+            focused={focused && active === "margin"}
+          />
+        </Box>
+      </Box>
+      {marginReason && focused && active === "margin" ? (
+        <Box width={width} flexShrink={0} alignItems="flex-end">
+          <Text fg={colors.textDim}>{marginReason}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+/**
+ * The leverage track: click or drag anywhere on it. The desktop draws a rail
+ * filled up to the value, ticks at the common values and a round handle; the
+ * terminal keeps a row of cells.
+ */
+function LeverageTrack({
+  value,
+  max,
+  stops,
+  focused,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  stops: number[];
+  focused: boolean;
+  onChange: (value: number) => void;
+}) {
+  const native = useUiCapabilities().nativePaneChrome;
+  const rail = useRef<BoxRenderable | null>(null);
+  const [hover, setHover] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const change = (event: {
+  const pick = (event: {
     x?: number;
-    clientX?: number;
-    currentTarget?: {
-      getBoundingClientRect?: () => { left: number; width: number };
-    };
+    pixelX?: number;
     preventDefault?: () => void;
   }) => {
-    const bounds = event.currentTarget?.getBoundingClientRect?.();
-    const left = bounds?.left ?? track.current?.x ?? 0;
-    const size = bounds?.width ?? track.current?.width ?? width;
-    const x = event.clientX ?? event.x;
-    if (x == null) return;
+    const node = rail.current;
+    if (!node) return;
     event.preventDefault?.();
-    onChange(
-      Math.max(
-        1,
-        Math.min(
-          max,
-          Math.round(1 + ((x - left) / Math.max(1, Number(size))) * (max - 1)),
-        ),
-      ),
-    );
+    const rect = native ? node.getBoundingClientRect?.() : undefined;
+    const left = node.absoluteX ?? node.x ?? 0;
+    // The desktop measures in pixels; in the terminal each cell is a position
+    // and the last one is the cap.
+    const ratio =
+      rect && event.pixelX != null
+        ? (event.pixelX - rect.x) / Math.max(1, rect.width)
+        : ((event.x ?? left) - left) / Math.max(1, Number(node.width) - 1);
+    onChange(1 + Math.max(0, Math.min(1, ratio)) * (max - 1));
   };
-  const ratio = ((value - 1) / Math.max(1, max - 1)) * 100;
-  return (
-    <Box flexDirection="row" gap={1} alignItems="center" width={width}>
+  const ratio = max > 1 ? (value - 1) / (max - 1) : 1;
+  const at = (stop: number) =>
+    `${(max > 1 ? (stop - 1) / (max - 1) : 1) * 100}%`;
+  const lit = focused || hover || dragging;
+  const handlers = {
+    cursor: native ? (dragging ? "grabbing" : "pointer") : "pointer",
+    role: "slider",
+    "aria-label": "Leverage",
+    "aria-valuemin": 1,
+    "aria-valuemax": max,
+    "aria-valuenow": value,
+    "aria-valuetext": `${value}x`,
+    "data-gloom-interactive": "true",
+    onMouseDown: (event: any) => {
+      setDragging(true);
+      pick(event);
+    },
+    onMouseDrag: (event: any) => pick(event),
+    onMouseDragEnd: () => setDragging(false),
+    onMouseUp: () => setDragging(false),
+    onMouseOver: () => setHover(true),
+    onMouseOut: () => setHover(false),
+  };
+
+  if (!native)
+    return (
       <Box
-        ref={track}
+        ref={rail}
+        flexDirection="row"
         height={1}
         flexGrow={1}
         flexBasis={0}
         minWidth={4}
-        position="relative"
-        cursor="pointer"
         backgroundColor={colors.border}
-        role="slider"
-        aria-label="Leverage"
-        aria-valuemin={1}
-        aria-valuemax={max}
-        aria-valuenow={value}
-        onMouseDown={(event: any) => {
-          setDragging(true);
-          change(event);
-        }}
-        onMouseDrag={(event: any) => change(event)}
-        onMouseDragEnd={() => setDragging(false)}
-        onMouseMove={(event: any) => {
-          if (dragging) change(event);
-        }}
-        onMouseUp={() => setDragging(false)}
-        style={
-          native
-            ? { height: "4px", minHeight: "4px", borderRadius: "2px" }
-            : undefined
-        }
+        {...handlers}
       >
         <Box
           height={1}
-          width={`${ratio}%`}
-          backgroundColor={
-            native
-              ? focused
-                ? colors.textBright
-                : colors.borderFocused
-              : colors.textDim
-          }
-          style={
-            native
-              ? { height: "4px", minHeight: "4px", borderRadius: "2px" }
-              : undefined
-          }
+          flexGrow={ratio}
+          flexBasis={0}
+          backgroundColor={colors.textDim}
         />
         <Box
-          position="absolute"
-          left={native ? `${ratio}%` : `${Math.min(97, ratio)}%`}
           height={1}
           width={1}
+          flexShrink={0}
           backgroundColor={colors.textBright}
-          style={
-            native
-              ? {
-                  width: "12px",
-                  height: "12px",
-                  minHeight: "12px",
-                  top: "-4px",
-                  marginLeft: "-6px",
-                  borderRadius: "50%",
-                  boxShadow: focused
-                    ? `0 0 0 3px ${colors.borderFocused}`
-                    : undefined,
-                }
-              : undefined
-          }
+        />
+        <Box height={1} flexGrow={1 - ratio} flexBasis={0} />
+      </Box>
+    );
+
+  const fill = lit ? colors.textBright : colors.borderFocused;
+  return (
+    // Inset by the handle's radius so the handle stays inside at either end.
+    <Box
+      height={1}
+      flexGrow={1}
+      flexBasis={0}
+      minWidth={6}
+      justifyContent="center"
+      style={{ paddingInline: 8, boxSizing: "border-box" }}
+      {...handlers}
+    >
+      <Box
+        ref={rail}
+        position="relative"
+        style={{
+          height: 4,
+          minHeight: 4,
+          borderRadius: 2,
+          background: blendHex(colors.border, colors.textDim, 0.35),
+        }}
+      >
+        <Box
+          position="absolute"
+          style={{
+            left: 0,
+            top: 0,
+            height: 4,
+            width: `${ratio * 100}%`,
+            borderRadius: 2,
+            background: fill,
+          }}
+        />
+        {/* The ends are 1x and the cap; the ticks mark the values between. */}
+        {stops.slice(1, -1).map((stop) => (
+          <Box
+            key={stop}
+            position="absolute"
+            style={{
+              left: at(stop),
+              top: -1,
+              width: 6,
+              height: 6,
+              marginLeft: -3,
+              borderRadius: "50%",
+              background:
+                stop <= value
+                  ? blendHex(fill, colors.bg, 0.55)
+                  : colors.textDim,
+            }}
+          />
+        ))}
+        <Box
+          position="absolute"
+          style={{
+            left: `${ratio * 100}%`,
+            top: -6,
+            width: 16,
+            height: 16,
+            marginLeft: -8,
+            borderRadius: "50%",
+            boxSizing: "border-box",
+            background: colors.textBright,
+            border: `3px solid ${colors.bg}`,
+            boxShadow: focused
+              ? `0 0 0 2px ${colors.borderFocused}`
+              : lit
+                ? `0 0 0 4px ${blendHex(colors.bg, colors.textBright, 0.18)}`
+                : `0 0 0 1px ${hairline()}`,
+            cursor: dragging ? "grabbing" : "grab",
+          }}
         />
       </Box>
-      <Text fg={colors.textBright}>{`${value}x`}</Text>
-      <Text fg={colors.textDim}>{`/ ${max}x`}</Text>
+    </Box>
+  );
+}
+
+/**
+ * The leverage number between a step down and a step up. A click on the
+ * number or the field ring puts it in typing mode, empty with the current
+ * value as a hint, so the digits typed replace it.
+ */
+function LeverageStepper({
+  value,
+  max,
+  active,
+  focused,
+  onActivate,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  active: boolean;
+  focused: boolean;
+  onActivate: () => void;
+  onChange: (value: number) => void;
+}) {
+  const native = useUiCapabilities().nativePaneChrome;
+  const input = useRef<InputRenderable | null>(null);
+  const [draft, setDraft] = useState("");
+  // A terminal input reports its text again as it loses focus; that is not
+  // an edit.
+  const editing = useRef(active);
+  editing.current = active;
+  useLayoutEffect(() => {
+    if (!active) setDraft("");
+  }, [active]);
+  // A step, a click on the track or a common value shows in the field.
+  useLayoutEffect(() => {
+    if (active && Number(draft) !== value) setDraft(String(value));
+  }, [value]);
+  useEffect(() => {
+    if (active && focused) input.current?.focus?.();
+  }, [active, focused]);
+  const digits = String(max).length;
+  const step = (label: string, name: string, delta: number) => {
+    const disabled = delta < 0 ? value <= 1 : value >= max;
+    const ink = disabled ? colors.textMuted : colors.text;
+    // The desktop draws the minus and plus as bars, centred on the box.
+    const bar = (vertical: boolean) => (
+      <Box
+        position="absolute"
+        style={{
+          left: "50%",
+          top: "50%",
+          width: vertical ? 2 : 10,
+          height: vertical ? 10 : 2,
+          marginLeft: vertical ? -1 : -5,
+          marginTop: vertical ? -5 : -1,
+          borderRadius: 1,
+          background: ink,
+        }}
+      />
+    );
+    return (
+      <Box
+        width={native ? 2 : 3}
+        height={1}
+        flexShrink={0}
+        alignItems="center"
+        justifyContent="center"
+        cursor={disabled ? "default" : "pointer"}
+        role="button"
+        aria-label={name}
+        aria-disabled={disabled || undefined}
+        data-gloom-interactive={disabled ? undefined : "true"}
+        hoverBackgroundColor={
+          native && !disabled
+            ? blendHex(colors.bg, colors.textBright, 0.08)
+            : undefined
+        }
+        onMouseDown={(event: { preventDefault?: () => void }) => {
+          event.preventDefault?.();
+          if (!disabled) onChange(value + delta);
+        }}
+        position={native ? "relative" : undefined}
+        style={
+          native
+            ? { alignSelf: "stretch", borderRadius: RADIUS - 2 }
+            : undefined
+        }
+      >
+        {native ? (
+          <>
+            {bar(false)}
+            {delta > 0 ? bar(true) : null}
+          </>
+        ) : (
+          <Text fg={ink}>{label}</Text>
+        )}
+      </Box>
+    );
+  };
+  return (
+    <Box
+      flexDirection="row"
+      height={1}
+      flexShrink={0}
+      alignItems="center"
+      backgroundColor={native ? undefined : colors.panel}
+      style={
+        native
+          ? {
+              border: `1px solid ${active && focused ? colors.borderFocused : hairline()}`,
+              borderRadius: RADIUS,
+              padding: 1,
+              boxSizing: "border-box",
+            }
+          : undefined
+      }
+    >
+      {step("\u2212", "Lower leverage", -1)}
+      <Box
+        width={digits + 2}
+        height={1}
+        flexShrink={0}
+        flexDirection="row"
+        alignItems="center"
+        justifyContent={active ? "flex-start" : "center"}
+        backgroundColor={
+          active
+            ? native
+              ? blendHex(colors.bg, colors.textBright, 0.06)
+              : colors.selected
+            : undefined
+        }
+        cursor="text"
+        onMouseDown={onActivate}
+      >
+        {active ? (
+          <NumberField
+            inputRef={input}
+            value={draft}
+            placeholder={String(value)}
+            focused={focused}
+            // A terminal input keeps a cell past the cursor, so there the x
+            // gives up its cell while typing.
+            width={digits + (native ? 1 : 2)}
+            variant={native ? "plain" : "default"}
+            backgroundColor={native ? "transparent" : colors.selected}
+            textColor={native ? colors.textBright : colors.selectedText}
+            placeholderColor={colors.textMuted}
+            allowDecimal={false}
+            onMouseDown={onActivate}
+            onChange={(text) => {
+              if (!editing.current) return;
+              setDraft(text);
+              const typed = Number(text);
+              if (!text.trim() || !Number.isFinite(typed) || typed < 1) return;
+              if (typed > max) setDraft(String(max));
+              onChange(Math.min(typed, max));
+            }}
+          />
+        ) : (
+          <Text fg={colors.textBright} attributes={TextAttributes.BOLD}>
+            {String(value)}
+          </Text>
+        )}
+        {native || !active ? (
+          <Text
+            fg={active ? colors.textDim : colors.textBright}
+            attributes={active ? 0 : TextAttributes.BOLD}
+          >
+            x
+          </Text>
+        ) : null}
+      </Box>
+      {step("+", "Raise leverage", 1)}
     </Box>
   );
 }

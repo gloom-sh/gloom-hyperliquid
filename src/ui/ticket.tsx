@@ -47,12 +47,13 @@ import {
 } from "./format";
 import { useAccount } from "./hooks";
 import { placeError, type FieldId, type Place } from "./ticket-errors";
-import { MarginDialog, TicketContext, type MarginChoice } from "./ticket-parts";
+import { TicketContext } from "./ticket-parts";
 import {
   ActionButton,
   AmountField,
   FieldNote,
   FigurePairs,
+  LeverageControl,
   MenuChoices,
   SideToggle,
   type MenuControl,
@@ -116,7 +117,9 @@ type RingId =
   | FieldId
   | "side"
   | "kind"
+  | "leverage"
   | "margin"
+  | "applyLeverage"
   | "unit"
   | "percent"
   | "advanced"
@@ -386,32 +389,6 @@ export function OrderTicket({
       setBusy(false);
     }
   };
-  const openMargin = async () => {
-    setActive("margin");
-    const choice = await dialog
-      .prompt<MarginChoice>({
-        closeOnClickOutside: true,
-        content: (context) => (
-          <MarginDialog
-            {...context}
-            coin={market.coin}
-            marginMode={ticket.marginMode}
-            leverage={draft.leverage}
-            max={market.maxLeverage}
-            onlyIsolated={market.onlyIsolated}
-            canApply={account.status?.mode === "trading"}
-          />
-        ),
-      })
-      .catch(() => undefined);
-    if (!choice) return;
-    if (
-      choice.leverage !== draft.leverage ||
-      choice.marginMode !== draft.marginMode
-    )
-      update({ leverage: choice.leverage, marginMode: choice.marginMode });
-    if (choice.apply) void applyLeverage(choice.leverage, choice.marginMode);
-  };
   usePaneFooter(
     "hyperliquid-ticket-result",
     () => ({
@@ -487,6 +464,15 @@ export function OrderTicket({
     (p) => p.coin === market.coin,
   );
   const coins = Number(preview.size);
+  // An open position carries the account's leverage for this market. The
+  // order sets the chosen leverage as it is placed; Apply sets it now.
+  const leveragePending =
+    trading &&
+    !!position &&
+    (draft.leverage !== position.leverage.value ||
+      ticket.marginMode !== position.leverage.type);
+  const applyChosenLeverage = () =>
+    void applyLeverage(draft.leverage, ticket.marginMode);
   const switchUnit = (unit: "usd" | "coin") => {
     if (unit === draft.sizeUnit) return;
     // Convert what is entered so the order keeps its size in the new unit.
@@ -552,11 +538,19 @@ export function OrderTicket({
       ? (["scaleStart", "scaleEnd", "scaleCount"] as const)
       : []),
   ];
-  const textFields = new Set<RingId>([...kindFields, "size", "tp", "sl"]);
+  const textFields = new Set<RingId>([
+    ...kindFields,
+    "leverage",
+    "size",
+    "tp",
+    "sl",
+  ]);
   const ringIds: RingId[] = [
     "side",
     "kind",
+    "leverage",
     "margin",
+    ...(leveragePending ? (["applyLeverage"] as const) : []),
     ...kindFields,
     "size",
     "unit",
@@ -584,7 +578,14 @@ export function OrderTicket({
     actions: {
       side: () => set("side", buy ? "sell" : "buy"),
       kind: () => moreMenu.current?.open(),
-      margin: () => void openMargin(),
+      margin: () => {
+        if (!market.onlyIsolated)
+          set(
+            "marginMode",
+            ticket.marginMode === "cross" ? "isolated" : "cross",
+          );
+      },
+      applyLeverage: applyChosenLeverage,
       unit: () => switchUnit(draft.sizeUnit === "coin" ? "usd" : "coin"),
       advanced: () => setAdvanced(!advanced),
       tpslUnit: () => setTpslUnit(tpslUnit === "price" ? "percent" : "price"),
@@ -635,7 +636,10 @@ export function OrderTicket({
         event.preventDefault();
         event.stopPropagation();
         setActive(null);
-        void submit();
+        // Enter in the leverage applies it where Apply shows; elsewhere it
+        // places the order.
+        if (active !== "leverage") void submit();
+        else if (leveragePending) applyChosenLeverage();
       }
     },
     {
@@ -838,35 +842,67 @@ export function OrderTicket({
     </Box>
   );
 
-  const accountRow = (
-    <Box
-      flexDirection="row"
-      width={inner}
-      height={1}
-      gap={1}
-      alignItems="center"
-      flexShrink={0}
-      ref={ring.nodeRef("margin")}
-    >
-      <Button
-        label={`${ticket.marginMode === "cross" ? "Cross" : "Isolated"} ${draft.leverage}x`}
-        compact
-        active={focused && active === "margin"}
-        onPress={() => void openMargin()}
+  const marginError = errorText("margin");
+  const leverageRows = (
+    <Box flexDirection="column" flexShrink={0} {...groupGap}>
+      <LeverageControl
+        value={draft.leverage}
+        max={market.maxLeverage}
+        onChange={(value) => set("leverage", value)}
+        marginMode={ticket.marginMode}
+        onlyIsolated={market.onlyIsolated}
+        onMarginMode={(mode) => set("marginMode", mode)}
+        active={active === "leverage" || active === "margin" ? active : null}
+        focused={focused}
+        onActivate={setActive}
+        width={inner}
+        labelWidth={LABEL_WIDTH}
+        leverageRef={ring.nodeRef("leverage")}
+        marginRef={ring.nodeRef("margin")}
       />
-      <Box flexGrow={1} />
-      <Box flexShrink={1} overflow="hidden">
-        <Text fg={colors.textDim}>
-          {`Available ${
-            available == null
-              ? missing
-              : number(available, available >= 10_000 ? 0 : 2)
-          } ${market.collateral}`}
-        </Text>
+      {marginError ? (
+        <Box width={inner} flexShrink={0}>
+          <Text fg={colors.negative} wrapText>
+            {marginError}
+          </Text>
+        </Box>
+      ) : null}
+      <Box
+        flexDirection="row"
+        width={inner}
+        height={1}
+        gap={1}
+        alignItems="center"
+        flexShrink={0}
+      >
+        {leveragePending ? (
+          <Box flexShrink={0} ref={ring.nodeRef("applyLeverage")}>
+            <Button
+              label={`Apply ${draft.leverage}x`}
+              title={`Set ${market.coin} to ${draft.leverage}x ${ticket.marginMode} now`}
+              compact={native}
+              disabled={busy}
+              active={focused && active === "applyLeverage"}
+              onPress={() => {
+                setActive("applyLeverage");
+                applyChosenLeverage();
+              }}
+            />
+          </Box>
+        ) : null}
+        <Box flexGrow={1} />
+        <Box flexShrink={1} overflow="hidden">
+          <Text fg={colors.textDim}>
+            {`Available ${
+              available == null
+                ? missing
+                : number(available, available >= 10_000 ? 0 : 2)
+            } ${market.collateral}`}
+          </Text>
+        </Box>
       </Box>
     </Box>
   );
-  const marginError = errorText("margin");
 
   const kindTabs = (
     <Box
@@ -1083,7 +1119,6 @@ export function OrderTicket({
     ...problems
       .filter((problem) => !problem.place)
       .map((problem) => ({ text: problem.message, color: colors.negative })),
-    ...(marginError ? [{ text: marginError, color: colors.negative }] : []),
     ...warnings.map((text) => ({ text, color: colors.warning })),
     ...(fill ? [{ text: fill, color: colors.warning }] : []),
   ];
@@ -1148,7 +1183,7 @@ export function OrderTicket({
         />
       </Box>
       {kindTabs}
-      {accountRow}
+      {leverageRows}
       {kindRows.length ? (
         <Box flexDirection="column" flexShrink={0} {...groupGap}>
           {kindRows}
