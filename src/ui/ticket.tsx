@@ -881,6 +881,7 @@ export function OrderTicket({
               label={`Apply ${draft.leverage}x`}
               title={`Set ${market.coin} to ${draft.leverage}x ${ticket.marginMode} now`}
               compact
+              variant="primary"
               disabled={busy}
               active={focused && active === "applyLeverage"}
               onPress={() => {
