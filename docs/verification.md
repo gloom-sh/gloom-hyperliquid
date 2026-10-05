@@ -1,11 +1,11 @@
 # Verification and scope ledger
 
-Private draft PR: https://github.com/gloom-sh/gloom-hyperliquid/pull/1
-
-This ledger distinguishes implemented paths from live verification. No mainnet
-signed request, real funds, existing wallet, seed phrase or Godel account was
-used in development. The public builder address was checked read-only; its key
-was never accessed. No paid API key or third-party project was created.
+This ledger distinguishes implemented paths from live verification. Development
+used read-only mainnet data and throwaway testnet funds. The maintainers
+separately ran small mainnet checks with a fresh account: approval, builder-fee
+accrual, entry, cancellation and full close. Browser-wallet and hardware-wallet
+approval flows have not been verified live. The builder address was checked
+read-only. No paid API key or third-party project was created.
 
 ## Scope
 
