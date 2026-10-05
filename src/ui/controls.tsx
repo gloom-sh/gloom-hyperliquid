@@ -489,7 +489,7 @@ export function LeverageControl({
   // 1x and the cap stay.
   const chips = [...stops];
   const room = width - segmentsWidth(["Cross", "Isolated"]) - (native ? 2 : 1);
-  for (const drop of [3, 2, 5, 20, 10]) {
+  for (const drop of [3, 2, 5, 10, 20]) {
     if (segmentsWidth(chips.map(chipLabel)) <= room) break;
     const at = chips.indexOf(drop);
     if (at > 0 && drop < max) chips.splice(at, 1);
